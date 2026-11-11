@@ -2,9 +2,17 @@
 // y se monta, escalada, sobre una hoja membretada. Los números quedan nítidos a cualquier zoom y el
 // archivo pesa una fracción de lo que pesan las imágenes.
 
-import { degrees, PDFDocument, type PDFEmbeddedPage, type PDFPage, StandardFonts } from "pdf-lib";
+import {
+  degrees,
+  PDFDocument,
+  type PDFEmbeddedPage,
+  type PDFPage,
+  rgb,
+  StandardFonts,
+} from "pdf-lib";
 import type { Crop } from "./crop";
 import type { PageSetup } from "./docx";
+import { maskWithinCrop, rotateRectLeft } from "./mask";
 import { mmToPt } from "./units";
 
 export interface MarginsMm {
@@ -17,6 +25,11 @@ export interface MarginsMm {
 export interface VectorPage {
   /** Recorte en fracciones de la página tal como se ve (ya rotada). */
   crop: Crop;
+  /**
+   * Rectángulos que se tapan, en fracciones de la página. Ojo: en un PDF vectorial la máscara se
+   * dibuja encima y tapa a la vista, pero el texto de debajo sigue en el archivo.
+   */
+  masks?: { rect: Crop; rgb: readonly [number, number, number] }[];
 }
 
 export interface VectorOptions {
@@ -265,6 +278,22 @@ export async function buildVectorPdf(
       yScale: k,
       rotate: degrees(angle),
     });
+
+    // Máscaras: encima del contenido, en el rectángulo que ocupa la página ya enderezada.
+    for (const mask of pages[i].masks ?? []) {
+      const inside = maskWithinCrop(mask.rect, pages[i].crop);
+      if (!inside) continue;
+      const r = turn ? rotateRectLeft(inside) : inside;
+      const W = occW * k;
+      const H = occH * k;
+      page.drawRectangle({
+        x: X + r.x0 * W,
+        y: Y + (1 - r.y1) * H,
+        width: (r.x1 - r.x0) * W,
+        height: (r.y1 - r.y0) * H,
+        color: rgb(mask.rgb[0] / 255, mask.rgb[1] / 255, mask.rgb[2] / 255),
+      });
+    }
   }
 
   return out.save();

@@ -1,6 +1,7 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { type Band, inkBands } from "./bands";
 import { type Crop, toPixels } from "./crop";
+import { type Mask, paintMasks } from "./mask";
 import { renderPage } from "./pdf";
 
 /** Resolución para buscar el contenido: de sobra para encontrar bordes y rápida en 200 páginas. */
@@ -45,8 +46,17 @@ export async function renderCropped(
   pageNumber: number,
   dpi: number,
   crop: Crop,
+  masks: Mask[] = [],
 ): Promise<HTMLCanvasElement> {
   const full = await renderPage(doc, pageNumber, dpi);
+  // Las máscaras se pintan sobre la página completa: en la imagen lo tapado desaparece de verdad.
+  paintMasks(
+    full.getContext("2d") as CanvasRenderingContext2D,
+    masks,
+    pageNumber,
+    full.width,
+    full.height,
+  );
   const r = toPixels(crop, full.width, full.height);
   const out = document.createElement("canvas");
   out.width = r.w;

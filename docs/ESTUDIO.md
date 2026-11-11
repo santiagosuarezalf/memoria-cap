@@ -111,5 +111,7 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
       páginas con /Rotate interno.
 - [x] **0.4.1:** numerar las hojas del PDF desde la app, con texto libre ({n}, {total}), número
       inicial, posición y tamaño (el membrete es fijo y repetiría su número).
-- [ ] **0.5:** máscaras, perfiles e importación de `.vic`.
+- [x] **0.5:** máscaras (se arrastran sobre la vista previa; todas las páginas o un rango; en el
+      PDF vectorial tapan a la vista pero el texto de debajo sigue en el archivo, y la app lo avisa),
+      perfiles .json, la última configuración se recuerda, e importación de los `.vic` de ImageCap.
 - [ ] Instalador de macOS (ver [MACOS.md](MACOS.md)).

@@ -10,7 +10,16 @@ import {
   suggestedMaxHeightMm,
   type Template,
 } from "../core/docx";
+import { appliesTo, MASK_COLORS, type Mask } from "../core/mask";
 import { openPdf, renderPage } from "../core/pdf";
+import {
+  cropFromMarginsMm,
+  loadLastSettings,
+  type Settings,
+  saveLastSettings,
+  serializeProfile,
+  type VicSettings,
+} from "../core/profile";
 import {
   analyzePages,
   canvasToBytes,
@@ -29,23 +38,43 @@ import {
 import { chooseFolder, saveFile } from "../platform/save";
 import { About } from "./About";
 import { CropEditor } from "./CropEditor";
+import { MaskEditor } from "./MaskEditor";
+import { MaskList } from "./MaskList";
+import { ProfileMenu } from "./ProfileMenu";
 
 const PREVIEW_DPI = 110;
+
+const DEFAULT_SETTINGS: Settings = {
+  mode: "all",
+  paddingMm: 3,
+  skipRepeated: true,
+  globalCrops: {},
+  dpi: 250,
+  format: "png",
+  landscapeMode: "rotate",
+  maxHeightMm: suggestedMaxHeightMm(DEFAULT_SETUP),
+  pdfMargins: marginsFrom(DEFAULT_SETUP),
+  numbering: null,
+  masks: [],
+};
 
 type Mode = "all" | "page";
 
 export function App() {
+  // La última configuración usada en este equipo se lee antes del primer render, para que nada
+  // la pise mientras se carga.
+  const [initial] = useState(() => loadLastSettings(DEFAULT_SETTINGS) ?? DEFAULT_SETTINGS);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [fileName, setFileName] = useState("");
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [page, setPage] = useState(1);
-  const [mode, setMode] = useState<Mode>("all");
-  const [paddingMm, setPaddingMm] = useState(3);
+  const [mode, setMode] = useState<Mode>(initial.mode);
+  const [paddingMm, setPaddingMm] = useState(initial.paddingMm);
   // En modo "todas", el recorte manual se guarda por tamaño de hoja (vertical y horizontal aparte).
-  const [globalCrops, setGlobalCrops] = useState<Record<string, Crop>>({});
+  const [globalCrops, setGlobalCrops] = useState<Record<string, Crop>>(initial.globalCrops);
   const [pageCrops, setPageCrops] = useState<Record<number, Crop>>({});
-  const [dpi, setDpi] = useState(250);
-  const [format, setFormat] = useState<ImageFormat>("png");
+  const [dpi, setDpi] = useState(initial.dpi);
+  const [format, setFormat] = useState<ImageFormat>(initial.format);
   const [baseName, setBaseName] = useState("anexo");
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(
     null,
@@ -53,16 +82,71 @@ export function App() {
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [about, setAbout] = useState(false);
   const [template, setTemplate] = useState<{ name: string; t: Template } | null>(null);
-  const [maxHeightMm, setMaxHeightMm] = useState(suggestedMaxHeightMm(DEFAULT_SETUP));
-  const [landscapeMode, setLandscapeMode] = useState<"rotate" | "section">("rotate");
+  const [maxHeightMm, setMaxHeightMm] = useState(initial.maxHeightMm);
+  const [landscapeMode, setLandscapeMode] = useState(initial.landscapeMode);
   const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
   const [letterhead, setLetterhead] = useState<{ name: string; bytes: Uint8Array } | null>(null);
-  const [pdfMargins, setPdfMargins] = useState<MarginsMm>(marginsFrom(DEFAULT_SETUP));
-  const [numbering, setNumbering] = useState<Numbering | null>(null);
+  const [pdfMargins, setPdfMargins] = useState<MarginsMm>(initial.pdfMargins);
+  const [numbering, setNumbering] = useState<Numbering | null>(initial.numbering);
+  const [masks, setMasks] = useState<Mask[]>(initial.masks);
+  const [selectedMask, setSelectedMask] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const busy = progress !== null;
 
-  const [skipRepeated, setSkipRepeated] = useState(true);
+  const [skipRepeated, setSkipRepeated] = useState(initial.skipRepeated);
+
+  // ---- Perfil: toda la configuración junta, para guardarla, cargarla y recordarla ----
+  const settings: Settings = {
+    mode,
+    paddingMm,
+    skipRepeated,
+    globalCrops,
+    dpi,
+    format,
+    landscapeMode,
+    maxHeightMm,
+    pdfMargins,
+    numbering,
+    masks,
+  };
+  function applySettings(s: Settings) {
+    setMode(s.mode);
+    setPaddingMm(s.paddingMm);
+    setSkipRepeated(s.skipRepeated);
+    setGlobalCrops(s.globalCrops);
+    setDpi(s.dpi);
+    setFormat(s.format);
+    setLandscapeMode(s.landscapeMode);
+    setMaxHeightMm(s.maxHeightMm);
+    setPdfMargins(s.pdfMargins);
+    setNumbering(s.numbering);
+    setMasks(s.masks);
+    setSelectedMask(null);
+  }
+  // Se recuerda en este equipo cada vez que cambia algo.
+  const serialized = serializeProfile(settings);
+  useEffect(() => saveLastSettings(serialized), [serialized]);
+
+  /** Un .vic de ImageCap trae márgenes de recorte: se aplican a cada tamaño de hoja del PDF. */
+  function applyVic(v: VicSettings) {
+    if (pages.length === 0) {
+      setMessage({
+        kind: "error",
+        text: "Abra primero el PDF: los márgenes del .vic dependen del tamaño de la hoja.",
+      });
+      return;
+    }
+    const crops: Record<string, Crop> = {};
+    for (const p of pages) {
+      crops[sizeKey(p.widthMm, p.heightMm)] = cropFromMarginsMm(v.marginsMm, p.widthMm, p.heightMm);
+    }
+    setMode("all");
+    setGlobalCrops(crops);
+    setDpi(v.dpi);
+    setFormat(v.format);
+    if (v.maxHeightMm) setMaxHeightMm(v.maxHeightMm);
+    setMessage({ kind: "ok", text: "Márgenes de ImageCap aplicados." });
+  }
   const running = useMemo(() => findRunningBands(pages.map((p) => p.bands)), [pages]);
   /** Área con contenido de cada página, sin encabezado ni pie del programa si así se pidió. */
   const autos = useMemo(
@@ -121,8 +205,7 @@ export function App() {
     setBaseName(file.name.replace(/\.pdf$/i, ""));
     setPage(1);
     setPages([]);
-    setGlobalCrops({});
-    setPageCrops({});
+    setPageCrops({}); // los recortes por página son de este PDF; los generales siguen (perfil)
     try {
       setProgress({ label: "Analizando páginas", done: 0, total: pdf.numPages });
       const info = await analyzePages(pdf, (done, total) =>
@@ -151,7 +234,7 @@ export function App() {
     try {
       for (let n = 1; n <= total; n++) {
         setProgress({ label: "Exportando imágenes", done: n - 1, total });
-        const canvas = await renderCropped(doc, n, dpi, cropFor(n));
+        const canvas = await renderCropped(doc, n, dpi, cropFor(n), masks);
         const bytes = await canvasToBytes(canvas, format);
         canvas.width = canvas.height = 0;
         await folder.write({ name: pageFileName(baseName, n, total, format), bytes });
@@ -192,7 +275,7 @@ export function App() {
         const c = cropFor(n);
         const p = pages[n - 1];
         const isLandscapePage = p.widthMm > p.heightMm;
-        let canvas = await renderCropped(doc, n, dpi, c);
+        let canvas = await renderCropped(doc, n, dpi, c, masks);
         let widthMm = (c.x1 - c.x0) * p.widthMm;
         let heightMm = (c.y1 - c.y0) * p.heightMm;
         let landscape = isLandscapePage;
@@ -233,7 +316,12 @@ export function App() {
     setMessage(null);
     setProgress({ label: "Armando el PDF", done: 0, total: 1 });
     try {
-      const crops = pages.map((_, i) => ({ crop: cropFor(i + 1) }));
+      const crops = pages.map((_, i) => ({
+        crop: cropFor(i + 1),
+        masks: masks
+          .filter((m) => appliesTo(m, i + 1))
+          .map((m) => ({ rect: m.rect, rgb: MASK_COLORS[m.color].rgb })),
+      }));
       const pdf = await buildVectorPdf(sourceBytes, crops, {
         margins: pdfMargins,
         landscapeMode,
@@ -290,7 +378,19 @@ export function App() {
           />
         </label>
         {fileName && <span className="truncate text-sm text-slate-500">{fileName}</span>}
-        <button type="button" className="ml-auto text-sm underline" onClick={() => setAbout(true)}>
+        <span className="ml-auto" />
+        <ProfileMenu
+          settings={settings}
+          disabled={busy}
+          onApply={(s) => {
+            applySettings(s);
+            setMessage({ kind: "ok", text: "Perfil cargado." });
+          }}
+          onVic={applyVic}
+          onError={(text) => setMessage({ kind: "error", text })}
+          onSaved={() => setMessage({ kind: "ok", text: "Perfil guardado." })}
+        />
+        <button type="button" className="text-sm underline" onClick={() => setAbout(true)}>
           Acerca de
         </button>
       </header>
@@ -365,6 +465,17 @@ export function App() {
                   Volver al recorte automático
                 </button>
               )}
+            </Section>
+
+            <Section title="Máscaras">
+              <MaskList
+                masks={masks}
+                page={page}
+                totalPages={doc.numPages}
+                selected={selectedMask}
+                onSelect={setSelectedMask}
+                onChange={setMasks}
+              />
             </Section>
 
             <Section title="Salida">
@@ -701,6 +812,17 @@ export function App() {
           <div className="relative shadow-lg" hidden={!doc}>
             <canvas ref={canvasRef} className="block h-auto max-h-[calc(100vh-9rem)] w-auto" />
             {info && <CropEditor crop={crop} onChange={setCrop} />}
+            {info && (
+              <MaskEditor
+                masks={masks}
+                page={page}
+                selected={selectedMask}
+                onSelect={setSelectedMask}
+                onChange={(id, rect) =>
+                  setMasks((all) => all.map((m) => (m.id === id ? { ...m, rect } : m)))
+                }
+              />
+            )}
           </div>
         </main>
       </div>
