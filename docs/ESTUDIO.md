@@ -61,7 +61,10 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
 
 ## Mejoras planeadas
 
-1. **Recorte automático.** Se rasteriza cada página a baja resolución, se busca el rectángulo con
+1. **Recorte automático.** Probado con un reporte real de ETABS: el programa repite encabezado
+   (título y fecha) y pie (versión y "Page N of M") en cada hoja, así que no basta con buscar la
+   tinta. Cada página se divide en bandas de contenido y se descartan las que se repiten en la
+   misma posición en la mayoría de las hojas. Se rasteriza cada página a baja resolución, se busca el rectángulo con
    tinta y se le deja un margen de respiro. Hay dos modos: *mismo recorte para todas* (la unión de
    los rectángulos) o *por página*. Las líneas de recorte se pueden arrastrar con el mouse sobre
    la vista previa.
@@ -97,8 +100,9 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
 
 - [x] **0.1:** base del proyecto, apertura del PDF, vista previa y detección automática del área
       con contenido.
-- [ ] **0.2:** recorte ajustable con el mouse y los dos modos; exportar imágenes PNG/JPG en el
-      orden correcto.
+- [x] **0.2:** recorte ajustable con el mouse y el teclado, en dos modos (igual para todas, por
+      tamaño de hoja, o por página); se quitan solos el encabezado y el pie que repite el programa
+      de cálculo; exportar imágenes PNG/JPG numeradas en el orden correcto.
 - [ ] **0.3:** exportar a Word sobre la plantilla, con altura fija o ajuste a márgenes, y
       secciones horizontales.
 - [ ] **0.4:** exportar a PDF vectorial sobre hoja membretada.
