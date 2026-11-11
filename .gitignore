@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+# Nunca subir documentos reales de proyectos ni datos personales
+*.pdf
+!tests/fixtures/*.pdf
+*.docx
+*.vic

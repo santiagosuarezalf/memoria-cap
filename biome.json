@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": { "includes": ["src/**", "*.ts", "*.json", "!package-lock.json"] },
+  "css": { "parser": { "tailwindDirectives": true } },
+  "formatter": { "indentStyle": "space", "lineWidth": 100 },
+  "linter": { "enabled": true }
+}

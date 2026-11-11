@@ -1,0 +1,18 @@
+[package]
+name = "memoria-cap"
+version = "0.1.0"
+description = "MemoriaCap: anexos de memorias de cálculo listos para radicar"
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "memoria_cap_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
