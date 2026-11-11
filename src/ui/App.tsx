@@ -19,6 +19,7 @@ import {
   renderCropped,
   rotateLeft,
 } from "../core/render";
+import { buildVectorPdf, type MarginsMm, marginsFrom } from "../core/vectorpdf";
 import { chooseFolder, saveFile } from "../platform/save";
 import { About } from "./About";
 import { CropEditor } from "./CropEditor";
@@ -48,6 +49,9 @@ export function App() {
   const [template, setTemplate] = useState<{ name: string; t: Template } | null>(null);
   const [maxHeightMm, setMaxHeightMm] = useState(suggestedMaxHeightMm(DEFAULT_SETUP));
   const [landscapeMode, setLandscapeMode] = useState<"rotate" | "section">("rotate");
+  const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
+  const [letterhead, setLetterhead] = useState<{ name: string; bytes: Uint8Array } | null>(null);
+  const [pdfMargins, setPdfMargins] = useState<MarginsMm>(marginsFrom(DEFAULT_SETUP));
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const busy = progress !== null;
 
@@ -95,14 +99,17 @@ export function App() {
     if (!file) return;
     setMessage(null);
     let pdf: PDFDocumentProxy;
+    let bytes: ArrayBuffer;
     try {
-      pdf = await openPdf(await file.arrayBuffer());
+      bytes = await file.arrayBuffer();
+      pdf = await openPdf(bytes);
     } catch {
       setMessage({ kind: "error", text: "No se pudo abrir el archivo. ¿Es un PDF válido?" });
       return;
     }
     await doc?.loadingTask.destroy(); // libera el PDF anterior
     setDoc(pdf);
+    setSourceBytes(new Uint8Array(bytes)); // para copiar las páginas en vectorial
     setFileName(file.name);
     setBaseName(file.name.replace(/\.pdf$/i, ""));
     setPage(1);
@@ -161,6 +168,7 @@ export function App() {
       const t = await loadTemplate(new Uint8Array(await file.arrayBuffer()));
       setTemplate({ name: file.name, t });
       setMaxHeightMm(suggestedMaxHeightMm(t.setup));
+      setPdfMargins(marginsFrom(t.setup));
     } catch (e) {
       setMessage({ kind: "error", text: e instanceof Error ? e.message : String(e) });
     }
@@ -211,6 +219,41 @@ export function App() {
     } finally {
       setProgress(null);
     }
+  }
+
+  async function exportPdf() {
+    if (!doc || !sourceBytes || pages.length === 0) return;
+    setMessage(null);
+    setProgress({ label: "Armando el PDF", done: 0, total: 1 });
+    try {
+      const crops = pages.map((_, i) => ({ crop: cropFor(i + 1) }));
+      const pdf = await buildVectorPdf(sourceBytes, crops, {
+        margins: pdfMargins,
+        landscapeMode,
+        letterhead: letterhead?.bytes,
+      });
+      const saved = await saveFile(`${baseName}-anexo.pdf`, pdf, {
+        name: "PDF",
+        extensions: ["pdf"],
+      });
+      if (saved)
+        setMessage({
+          kind: "ok",
+          text: `PDF con ${pages.length} páginas guardado (${(pdf.length / 1048576).toFixed(1)} MB).`,
+        });
+    } catch (e) {
+      setMessage({
+        kind: "error",
+        text: `No se pudo crear el PDF: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setProgress(null);
+    }
+  }
+
+  async function onLetterhead(file: File | undefined) {
+    if (!file) return;
+    setLetterhead({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
   }
 
   const info = pages[page - 1];
@@ -348,6 +391,21 @@ export function App() {
                   onChange={(e) => setBaseName(e.target.value)}
                 />
               </label>
+              <fieldset className="flex flex-col gap-1">
+                <legend className="mb-1">Páginas horizontales</legend>
+                <Radio
+                  name="land"
+                  checked={landscapeMode === "rotate"}
+                  onChange={() => setLandscapeMode("rotate")}
+                  label="Girarlas para que queden de pie"
+                />
+                <Radio
+                  name="land"
+                  checked={landscapeMode === "section"}
+                  onChange={() => setLandscapeMode("section")}
+                  label="Ponerlas en hoja horizontal"
+                />
+              </fieldset>
             </Section>
 
             <Section title="Word">
@@ -398,21 +456,6 @@ export function App() {
               <p className="-mt-2 text-xs text-slate-500">
                 Si alguna imagen pasa a la hoja siguiente, bájela unos milímetros.
               </p>
-              <fieldset className="flex flex-col gap-1">
-                <legend className="mb-1">Páginas horizontales</legend>
-                <Radio
-                  name="land"
-                  checked={landscapeMode === "rotate"}
-                  onChange={() => setLandscapeMode("rotate")}
-                  label="Girarlas para que queden de pie"
-                />
-                <Radio
-                  name="land"
-                  checked={landscapeMode === "section"}
-                  onChange={() => setLandscapeMode("section")}
-                  label="Ponerlas en hoja horizontal"
-                />
-              </fieldset>
               <button
                 type="button"
                 disabled={busy || pages.length === 0}
@@ -420,6 +463,80 @@ export function App() {
                 className="rounded bg-orange-600 px-3 py-2 font-medium text-white disabled:opacity-50"
               >
                 Exportar a Word…
+              </button>
+            </Section>
+
+            <Section title="PDF vectorial">
+              <p className="-mt-1 text-xs text-slate-500">
+                Las páginas se copian sin pasar a imagen: nítidas a cualquier zoom y livianas.
+              </p>
+              <div className="flex flex-col gap-1">
+                <span>Hoja membretada (PDF)</span>
+                <span className="flex items-center gap-2">
+                  <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 dark:border-slate-600">
+                    Elegir…
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        onLetterhead(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <span className="min-w-0 truncate text-xs" title={letterhead?.name}>
+                    {letterhead ? letterhead.name : "Ninguna: hoja carta en blanco"}
+                  </span>
+                  {letterhead && (
+                    <button
+                      type="button"
+                      className="text-xs underline"
+                      onClick={() => setLetterhead(null)}
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </span>
+                <span className="text-xs text-slate-500">
+                  Guarde la plantilla de Word como PDF (Archivo → Guardar como → PDF). Si trae
+                  número de página, saldrá el mismo en todas: bórrelo antes de guardarla.
+                </span>
+              </div>
+              <fieldset className="grid grid-cols-2 gap-x-3 gap-y-2">
+                <legend className="mb-1">Márgenes (mm)</legend>
+                {(
+                  [
+                    ["top", "Arriba"],
+                    ["bottom", "Abajo"],
+                    ["left", "Izquierda"],
+                    ["right", "Derecha"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key} className="flex flex-col text-xs">
+                    {label}
+                    <input
+                      type="number"
+                      className="w-full rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
+                      min={0}
+                      max={150}
+                      value={Math.round(pdfMargins[key])}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (Number.isFinite(n) && n >= 0)
+                          setPdfMargins((m) => ({ ...m, [key]: Math.min(150, n) }));
+                      }}
+                    />
+                  </label>
+                ))}
+              </fieldset>
+              <button
+                type="button"
+                disabled={busy || pages.length === 0}
+                onClick={exportPdf}
+                className="rounded bg-orange-600 px-3 py-2 font-medium text-white disabled:opacity-50"
+              >
+                Exportar a PDF…
               </button>
             </Section>
 
