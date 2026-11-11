@@ -19,7 +19,13 @@ import {
   renderCropped,
   rotateLeft,
 } from "../core/render";
-import { buildVectorPdf, type MarginsMm, marginsFrom } from "../core/vectorpdf";
+import {
+  buildVectorPdf,
+  DEFAULT_NUMBERING,
+  type MarginsMm,
+  marginsFrom,
+  type Numbering,
+} from "../core/vectorpdf";
 import { chooseFolder, saveFile } from "../platform/save";
 import { About } from "./About";
 import { CropEditor } from "./CropEditor";
@@ -52,6 +58,7 @@ export function App() {
   const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
   const [letterhead, setLetterhead] = useState<{ name: string; bytes: Uint8Array } | null>(null);
   const [pdfMargins, setPdfMargins] = useState<MarginsMm>(marginsFrom(DEFAULT_SETUP));
+  const [numbering, setNumbering] = useState<Numbering | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const busy = progress !== null;
 
@@ -231,6 +238,7 @@ export function App() {
         margins: pdfMargins,
         landscapeMode,
         letterhead: letterhead?.bytes,
+        numbering: numbering ?? undefined,
       });
       const saved = await saveFile(`${baseName}-anexo.pdf`, pdf, {
         name: "PDF",
@@ -499,8 +507,9 @@ export function App() {
                   )}
                 </span>
                 <span className="text-xs text-slate-500">
-                  Guarde la plantilla de Word como PDF (Archivo → Guardar como → PDF). Si trae
-                  número de página, saldrá el mismo en todas: bórrelo antes de guardarla.
+                  Guarde la plantilla de Word como PDF (Archivo → Guardar como → PDF), sin el número
+                  de página: si lo trae, saldrá el mismo en todas. La numeración la pone la app
+                  (abajo).
                 </span>
               </div>
               <fieldset className="grid grid-cols-2 gap-x-3 gap-y-2">
@@ -530,6 +539,86 @@ export function App() {
                   </label>
                 ))}
               </fieldset>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={numbering !== null}
+                  onChange={(e) => setNumbering(e.target.checked ? DEFAULT_NUMBERING : null)}
+                />
+                Numerar las hojas
+              </label>
+              {numbering && (
+                <div className="-mt-1 flex flex-col gap-2 border-l-2 border-slate-300 pl-3 dark:border-slate-600">
+                  <label className="flex flex-col gap-1 text-xs">
+                    Texto ({"{n}"} = número, {"{total}"} = último)
+                    <input
+                      className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
+                      value={numbering.format}
+                      onChange={(e) => setNumbering({ ...numbering, format: e.target.value })}
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                    <label className="flex flex-col text-xs">
+                      Empieza en
+                      <input
+                        type="number"
+                        min={1}
+                        className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
+                        value={numbering.startAt}
+                        onChange={(e) => {
+                          const n = Math.round(Number(e.target.value));
+                          if (n >= 1) setNumbering({ ...numbering, startAt: n });
+                        }}
+                      />
+                    </label>
+                    <label className="flex flex-col text-xs">
+                      Posición
+                      <select
+                        className="rounded border border-slate-300 bg-transparent px-1 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                        value={numbering.position}
+                        onChange={(e) =>
+                          setNumbering({
+                            ...numbering,
+                            position: e.target.value as Numbering["position"],
+                          })
+                        }
+                      >
+                        <option value="left">Izquierda</option>
+                        <option value="center">Centro</option>
+                        <option value="right">Derecha</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col text-xs">
+                      Desde abajo (mm)
+                      <input
+                        type="number"
+                        min={3}
+                        max={60}
+                        className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
+                        value={numbering.bottomMm}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (n >= 3 && n <= 60) setNumbering({ ...numbering, bottomMm: n });
+                        }}
+                      />
+                    </label>
+                    <label className="flex flex-col text-xs">
+                      Tamaño (pt)
+                      <input
+                        type="number"
+                        min={6}
+                        max={24}
+                        className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
+                        value={numbering.sizePt}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (n >= 6 && n <= 24) setNumbering({ ...numbering, sizePt: n });
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
               <button
                 type="button"
                 disabled={busy || pages.length === 0}

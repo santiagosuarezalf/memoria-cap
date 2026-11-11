@@ -2,7 +2,7 @@
 // y se monta, escalada, sobre una hoja membretada. Los números quedan nítidos a cualquier zoom y el
 // archivo pesa una fracción de lo que pesan las imágenes.
 
-import { degrees, PDFDocument, type PDFEmbeddedPage, type PDFPage } from "pdf-lib";
+import { degrees, PDFDocument, type PDFEmbeddedPage, type PDFPage, StandardFonts } from "pdf-lib";
 import type { Crop } from "./crop";
 import type { PageSetup } from "./docx";
 import { mmToPt } from "./units";
@@ -25,6 +25,37 @@ export interface VectorOptions {
   landscapeMode: "rotate" | "section";
   /** PDF con la hoja membretada: la primera hoja vertical y, si la hay, la primera horizontal. */
   letterhead?: Uint8Array;
+  /** Numerar las hojas (el membrete es fijo y no puede llevar el número). */
+  numbering?: Numbering;
+}
+
+export interface Numbering {
+  /** Texto con {n} (número de la hoja) y {total}. */
+  format: string;
+  /** Número de la primera hoja: un anexo suele empezar en mitad del informe. */
+  startAt: number;
+  position: "left" | "center" | "right";
+  /** Distancia del borde inferior de la hoja a la base del texto. */
+  bottomMm: number;
+  /** Distancia del borde lateral (no aplica si va centrado). */
+  sideMm: number;
+  sizePt: number;
+}
+
+export const DEFAULT_NUMBERING: Numbering = {
+  format: "{n}",
+  startAt: 1,
+  position: "right",
+  bottomMm: 12,
+  sideMm: 20,
+  sizePt: 10,
+};
+
+/** Arma el texto del número. El total es el número de la última hoja, no la cantidad. */
+export function formatPageNumber(format: string, index: number, count: number, startAt: number) {
+  return format
+    .replaceAll("{n}", String(startAt + index))
+    .replaceAll("{total}", String(startAt + count - 1));
 }
 
 const LETTER: [number, number] = [612, 792];
@@ -146,6 +177,8 @@ export async function buildVectorPdf(
     if (!portraitBg && !landscapeBg) throw new Error("La hoja membretada no tiene páginas");
   }
 
+  const font = opts.numbering ? await out.embedFont(StandardFonts.Helvetica) : null;
+
   const m = {
     top: mmToPt(opts.margins.top),
     bottom: mmToPt(opts.margins.bottom),
@@ -184,6 +217,26 @@ export async function buildVectorPdf(
     const size: [number, number] = bg ? bg.size : landscapeSheet ? [LETTER[1], LETTER[0]] : LETTER;
     const page = out.addPage(size);
     if (bg) page.drawPage(bg.page, { x: 0, y: 0, width: size[0], height: size[1] });
+    if (opts.numbering && font) {
+      const n = opts.numbering;
+      const text = formatPageNumber(n.format, i, pages.length, n.startAt);
+      let width: number;
+      try {
+        width = font.widthOfTextAtSize(text, n.sizePt);
+      } catch {
+        throw new Error(
+          `El texto del número tiene caracteres que no se pueden escribir: «${text}»`,
+        );
+      }
+      const side = mmToPt(n.sideMm);
+      const x =
+        n.position === "left"
+          ? side
+          : n.position === "center"
+            ? (size[0] - width) / 2
+            : size[0] - side - width;
+      page.drawText(text, { x, y: mmToPt(n.bottomMm), size: n.sizePt, font });
+    }
 
     // Página en blanco: queda solo la hoja membretada.
     const embedded = embeddedByPage.get(i);

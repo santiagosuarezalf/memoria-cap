@@ -109,6 +109,7 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
 - [x] **0.4:** exportar a PDF vectorial sobre hoja membretada: las páginas se copian sin pasar a
       imagen (43 páginas de ETABS: 0,5 MB frente a 18,5 MB del Word), con márgenes en mm y
       páginas con /Rotate interno.
-- [ ] **0.4.1:** numerar las páginas del PDF desde la app (el membrete es fijo y repite su número).
+- [x] **0.4.1:** numerar las hojas del PDF desde la app, con texto libre ({n}, {total}), número
+      inicial, posición y tamaño (el membrete es fijo y repetiría su número).
 - [ ] **0.5:** máscaras, perfiles e importación de `.vic`.
 - [ ] Instalador de macOS (ver [MACOS.md](MACOS.md)).

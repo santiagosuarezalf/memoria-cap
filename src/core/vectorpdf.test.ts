@@ -1,6 +1,13 @@
 import { degrees, PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { buildVectorPdf, cropToPdfBox, fitScale, placeRotated } from "./vectorpdf";
+import {
+  buildVectorPdf,
+  cropToPdfBox,
+  DEFAULT_NUMBERING,
+  fitScale,
+  formatPageNumber,
+  placeRotated,
+} from "./vectorpdf";
 
 const media = { x: 10, y: 20, width: 600, height: 800 };
 const crop = { x0: 0.1, y0: 0.2, x1: 0.5, y1: 0.6 };
@@ -137,5 +144,39 @@ describe("buildVectorPdf", () => {
     await expect(
       buildVectorPdf(await sourcePdf(), [full], { margins, landscapeMode: "rotate" }),
     ).rejects.toThrow(/páginas/);
+  });
+});
+
+describe("numeración", () => {
+  it("formatea {n} y {total} desde el número inicial", () => {
+    expect(formatPageNumber("{n} | Page", 0, 43, 1)).toBe("1 | Page");
+    expect(formatPageNumber("Página {n} de {total}", 2, 10, 37)).toBe("Página 39 de 46");
+    expect(formatPageNumber("Anexo", 0, 3, 1)).toBe("Anexo");
+  });
+
+  it("escribe el número en cada hoja, a partir del inicial", async () => {
+    const bytes = await buildVectorPdf(await sourcePdf(), [full, full, full], {
+      margins,
+      landscapeMode: "rotate",
+      numbering: { ...DEFAULT_NUMBERING, format: "Pág. {n}/{total}", startAt: 37 },
+    });
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const doc = await getDocument({ data: bytes }).promise;
+    const texts: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const content = await (await doc.getPage(i)).getTextContent();
+      texts.push(content.items.map((t) => ("str" in t ? t.str : "")).join(""));
+    }
+    expect(texts).toEqual(["Pág. 37/39", "Pág. 38/39", "Pág. 39/39"]);
+  });
+
+  it("avisa si el formato tiene caracteres que la fuente no puede escribir", async () => {
+    await expect(
+      buildVectorPdf(await sourcePdf(), [full, full, full], {
+        margins,
+        landscapeMode: "rotate",
+        numbering: { ...DEFAULT_NUMBERING, format: "{n} ✓" },
+      }),
+    ).rejects.toThrow(/caracteres/);
   });
 });
