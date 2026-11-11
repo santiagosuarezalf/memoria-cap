@@ -2,6 +2,14 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { boundsOf, contentWithout, findRunningBands } from "../core/bands";
 import { type Crop, FULL_PAGE, padMm, pageFileName, sizeKey, unionBySize } from "../core/crop";
+import {
+  buildDocx,
+  DEFAULT_SETUP,
+  type DocxImage,
+  loadTemplate,
+  suggestedMaxHeightMm,
+  type Template,
+} from "../core/docx";
 import { openPdf, renderPage } from "../core/pdf";
 import {
   analyzePages,
@@ -9,8 +17,9 @@ import {
   type ImageFormat,
   type PageInfo,
   renderCropped,
+  rotateLeft,
 } from "../core/render";
-import { chooseFolder } from "../platform/save";
+import { chooseFolder, saveFile } from "../platform/save";
 import { About } from "./About";
 import { CropEditor } from "./CropEditor";
 
@@ -36,6 +45,9 @@ export function App() {
   );
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [about, setAbout] = useState(false);
+  const [template, setTemplate] = useState<{ name: string; t: Template } | null>(null);
+  const [maxHeightMm, setMaxHeightMm] = useState(suggestedMaxHeightMm(DEFAULT_SETUP));
+  const [landscapeMode, setLandscapeMode] = useState<"rotate" | "section">("rotate");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const busy = progress !== null;
 
@@ -142,8 +154,68 @@ export function App() {
     }
   }
 
+  async function onTemplate(file: File | undefined) {
+    if (!file) return;
+    setMessage(null);
+    try {
+      const t = await loadTemplate(new Uint8Array(await file.arrayBuffer()));
+      setTemplate({ name: file.name, t });
+      setMaxHeightMm(suggestedMaxHeightMm(t.setup));
+    } catch (e) {
+      setMessage({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  async function exportWord() {
+    if (!doc || pages.length === 0) return;
+    setMessage(null);
+    const total = doc.numPages;
+    const images: DocxImage[] = [];
+    try {
+      for (let n = 1; n <= total; n++) {
+        setProgress({ label: "Preparando el Word", done: n - 1, total });
+        const c = cropFor(n);
+        const p = pages[n - 1];
+        const isLandscapePage = p.widthMm > p.heightMm;
+        let canvas = await renderCropped(doc, n, dpi, c);
+        let widthMm = (c.x1 - c.x0) * p.widthMm;
+        let heightMm = (c.y1 - c.y0) * p.heightMm;
+        let landscape = isLandscapePage;
+        if (isLandscapePage && landscapeMode === "rotate") {
+          canvas = rotateLeft(canvas);
+          [widthMm, heightMm] = [heightMm, widthMm];
+          landscape = false;
+        }
+        const bytes = await canvasToBytes(canvas, format);
+        canvas.width = canvas.height = 0;
+        images.push({
+          bytes,
+          ext: format === "png" ? "png" : "jpeg",
+          widthMm,
+          heightMm,
+          landscape,
+        });
+      }
+      setProgress({ label: "Armando el Word", done: total, total });
+      const docx = await buildDocx(images, { maxHeightMm }, template?.t);
+      const saved = await saveFile(`${baseName}.docx`, docx, {
+        name: "Documento de Word",
+        extensions: ["docx"],
+      });
+      if (saved) setMessage({ kind: "ok", text: `Word con ${total} páginas guardado.` });
+    } catch (e) {
+      setMessage({
+        kind: "error",
+        text: `No se pudo crear el Word: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setProgress(null);
+    }
+  }
+
   const info = pages[page - 1];
   const crop = cropFor(page);
+  const setup = template?.t.setup ?? DEFAULT_SETUP;
 
   return (
     <div className="flex h-screen flex-col">
@@ -244,7 +316,7 @@ export function App() {
               )}
             </Section>
 
-            <Section title="Imágenes">
+            <Section title="Salida">
               <NumberField
                 label="Resolución"
                 unit="dpi"
@@ -269,21 +341,97 @@ export function App() {
                 />
               </fieldset>
               <label className="flex flex-col gap-1">
-                Nombre de los archivos
+                Nombre de salida
                 <input
                   className="rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-600"
                   value={baseName}
                   onChange={(e) => setBaseName(e.target.value)}
                 />
-                <span className="text-xs text-slate-500">
-                  {pageFileName(baseName, 1, doc.numPages, format)}, …
-                </span>
               </label>
+            </Section>
+
+            <Section title="Word">
+              <div className="flex flex-col gap-1">
+                <span>Plantilla con encabezado</span>
+                <span className="flex items-center gap-2">
+                  <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 dark:border-slate-600">
+                    Elegir…
+                    <input
+                      type="file"
+                      accept=".docx,.dotx"
+                      className="hidden"
+                      onChange={(e) => {
+                        onTemplate(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <span className="min-w-0 truncate text-xs" title={template?.name}>
+                    {template ? template.name : "Ninguna: hoja carta en blanco"}
+                  </span>
+                  {template && (
+                    <button
+                      type="button"
+                      className="text-xs underline"
+                      onClick={() => {
+                        setTemplate(null);
+                        setMaxHeightMm(suggestedMaxHeightMm(DEFAULT_SETUP));
+                      }}
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </span>
+                <span className="text-xs text-slate-500">
+                  Hoja de {Math.round(setup.widthMm)} × {Math.round(setup.heightMm)} mm; ancho útil{" "}
+                  {Math.round(setup.widthMm - setup.marginLeftMm - setup.marginRightMm)} mm.
+                </span>
+              </div>
+              <NumberField
+                label="Altura máxima de cada imagen"
+                unit="mm"
+                value={maxHeightMm}
+                min={50}
+                max={Math.round(setup.heightMm)}
+                onChange={setMaxHeightMm}
+              />
+              <p className="-mt-2 text-xs text-slate-500">
+                Si alguna imagen pasa a la hoja siguiente, bájela unos milímetros.
+              </p>
+              <fieldset className="flex flex-col gap-1">
+                <legend className="mb-1">Páginas horizontales</legend>
+                <Radio
+                  name="land"
+                  checked={landscapeMode === "rotate"}
+                  onChange={() => setLandscapeMode("rotate")}
+                  label="Girarlas para que queden de pie"
+                />
+                <Radio
+                  name="land"
+                  checked={landscapeMode === "section"}
+                  onChange={() => setLandscapeMode("section")}
+                  label="Ponerlas en hoja horizontal"
+                />
+              </fieldset>
+              <button
+                type="button"
+                disabled={busy || pages.length === 0}
+                onClick={exportWord}
+                className="rounded bg-orange-600 px-3 py-2 font-medium text-white disabled:opacity-50"
+              >
+                Exportar a Word…
+              </button>
+            </Section>
+
+            <Section title="Imágenes sueltas">
+              <span className="text-xs text-slate-500">
+                {pageFileName(baseName, 1, doc.numPages, format)}, …
+              </span>
               <button
                 type="button"
                 disabled={busy || pages.length === 0}
                 onClick={exportImages}
-                className="rounded bg-orange-600 px-3 py-2 font-medium text-white disabled:opacity-50"
+                className="rounded border border-orange-600 px-3 py-2 font-medium text-orange-600 disabled:opacity-50"
               >
                 Exportar {doc.numPages} imágenes…
               </button>

@@ -71,3 +71,19 @@ export function canvasToBytes(canvas: HTMLCanvasElement, format: ImageFormat) {
     ),
   );
 }
+
+/**
+ * Gira 90° en sentido antihorario: una hoja horizontal queda de pie con su parte de arriba a la
+ * izquierda, como se suelen encuadernar los anexos.
+ */
+export function rotateLeft(src: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = src.height;
+  out.height = src.width;
+  const ctx = out.getContext("2d") as CanvasRenderingContext2D;
+  ctx.translate(0, out.height);
+  ctx.rotate(-Math.PI / 2);
+  ctx.drawImage(src, 0, 0);
+  src.width = src.height = 0;
+  return out;
+}

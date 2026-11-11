@@ -103,8 +103,9 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
 - [x] **0.2:** recorte ajustable con el mouse y el teclado, en dos modos (igual para todas, por
       tamaño de hoja, o por página); se quitan solos el encabezado y el pie que repite el programa
       de cálculo; exportar imágenes PNG/JPG numeradas en el orden correcto.
-- [ ] **0.3:** exportar a Word sobre la plantilla, con altura fija o ajuste a márgenes, y
-      secciones horizontales.
+- [x] **0.3:** exportar a Word sobre la plantilla (conserva encabezado, pie y márgenes; borra las
+      figuras viejas), con altura máxima ajustable, y páginas horizontales giradas o en
+      sección horizontal. Probado abriendo el resultado en Word.
 - [ ] **0.4:** exportar a PDF vectorial sobre hoja membretada.
 - [ ] **0.5:** máscaras, perfiles e importación de `.vic`.
 - [ ] Instalador de macOS (ver [MACOS.md](MACOS.md)).
