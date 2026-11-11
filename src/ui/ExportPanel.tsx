@@ -2,7 +2,16 @@ import { pageFileName } from "../core/crop";
 import type { PageSetup } from "../core/docx";
 import type { ImageFormat } from "../core/render";
 import { DEFAULT_NUMBERING, type MarginsMm, type Numbering } from "../core/vectorpdf";
-import { Callout, Check, FileButton, Icon, NumberField, PanelSection, Segmented } from "./controls";
+import {
+  Callout,
+  Check,
+  FileButton,
+  Icon,
+  NumberField,
+  NumberInput,
+  PanelSection,
+  Segmented,
+} from "./controls";
 
 export type Target = "word" | "pdf" | "images";
 
@@ -27,6 +36,8 @@ export interface ExportPanelProps {
   onClearTemplate: () => void;
   maxHeightMm: number;
   onMaxHeight: (n: number) => void;
+  wordStartAt: number | null;
+  onWordStartAt: (n: number | null) => void;
   // PDF
   letterheadName: string | null;
   onLetterhead: (f: File | undefined) => void;
@@ -42,6 +53,9 @@ export interface ExportPanelProps {
   onReview: () => void;
   onExport: () => void;
 }
+
+/** Las resoluciones que se usan para memorias: 250 es el mínimo legible al imprimir. */
+const DPI_PRESETS = [250, 300, 350];
 
 const TARGETS: { id: Target; title: string; detail: string }[] = [
   { id: "word", title: "Word", detail: "con plantilla" },
@@ -122,6 +136,25 @@ export function ExportPanel(p: ExportPanelProps) {
             <p className="-mt-1 m-0 text-xs text-subtle">
               Si alguna página pasa a la hoja siguiente, bájela unos milímetros.
             </p>
+            <Check
+              checked={p.wordStartAt !== null}
+              onChange={(v) => p.onWordStartAt(v ? 1 : null)}
+              detail="Para pegar el anexo dentro del informe sin que se reinicie la numeración."
+            >
+              Seguir la numeración del informe
+            </Check>
+            {p.wordStartAt !== null && (
+              <div className="border-l-2 border-line pl-3">
+                <NumberField
+                  compact
+                  label="La primera hoja del anexo es la número"
+                  value={p.wordStartAt}
+                  min={1}
+                  max={100000}
+                  onChange={(n) => p.onWordStartAt(Math.round(n))}
+                />
+              </div>
+            )}
           </PanelSection>
         )}
 
@@ -181,16 +214,40 @@ export function ExportPanel(p: ExportPanelProps) {
 
         {p.target !== "pdf" && (
           <PanelSection title="Calidad">
-            <div className="flex items-end gap-4">
-              <NumberField
-                label="Resolución"
-                unit="dpi"
-                value={p.dpi}
-                min={72}
-                max={600}
-                step={10}
-                onChange={p.onDpi}
-              />
+            <div className="flex flex-col gap-2">
+              <span className="text-[13px] font-medium">Resolución</span>
+              <div className="flex items-center gap-1.5">
+                {DPI_PRESETS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={p.dpi === d}
+                    onClick={() => p.onDpi(d)}
+                    className={`h-9 rounded-md px-3 font-mono text-sm ${
+                      p.dpi === d
+                        ? "bg-navy text-white"
+                        : "border border-line-strong bg-surface text-ink hover:bg-canvas"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+                <span className="ml-1 text-xs text-subtle">u otra:</span>
+                <NumberInput
+                  aria-label="Otra resolución en dpi"
+                  className="h-9 w-16 rounded-md border border-line-strong bg-surface px-2 font-mono text-sm text-ink"
+                  value={p.dpi}
+                  min={72}
+                  max={600}
+                  step={10}
+                  onChange={p.onDpi}
+                />
+                <span className="text-[13px] text-muted">dpi</span>
+              </div>
+              <span className="text-xs text-subtle">
+                Con menos de 250 dpi los números pequeños pueden quedar ilegibles al imprimir; con
+                más de 350 el archivo se vuelve muy pesado.
+              </span>
             </div>
             <Segmented
               label="Formato de imagen"

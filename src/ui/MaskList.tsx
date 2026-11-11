@@ -1,4 +1,5 @@
 import { MASK_COLORS, type Mask, type MaskColor, newMask } from "../core/mask";
+import { NumberInput } from "./controls";
 
 const field = "h-8 rounded-md border border-line-strong bg-surface px-1.5 text-[13px] text-ink";
 
@@ -85,30 +86,28 @@ export function MaskList({
               </select>
               {range && (
                 <>
-                  <input
-                    type="number"
+                  <NumberInput
                     aria-label="Desde la página"
                     className={`${field} w-14`}
                     min={1}
                     max={totalPages}
                     value={range.from}
-                    onChange={(e) => {
-                      const from = Math.min(totalPages, Math.max(1, Number(e.target.value)));
+                    onChange={(n) => {
+                      const from = Math.round(n);
                       update(m.id, {
                         pages: { kind: "range", from, to: Math.max(from, range.to) },
                       });
                     }}
                   />
                   a
-                  <input
-                    type="number"
+                  <NumberInput
                     aria-label="Hasta la página"
                     className={`${field} w-14`}
                     min={1}
                     max={totalPages}
                     value={range.to}
-                    onChange={(e) => {
-                      const to = Math.min(totalPages, Math.max(1, Number(e.target.value)));
+                    onChange={(n) => {
+                      const to = Math.round(n);
                       update(m.id, {
                         pages: { kind: "range", from: Math.min(range.from, to), to },
                       });

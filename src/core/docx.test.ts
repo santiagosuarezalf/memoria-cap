@@ -9,6 +9,7 @@ import {
   loadTemplate,
   parseSectPr,
   suggestedMaxHeightMm,
+  withPageNumbering,
 } from "./docx";
 
 const LETTER_SECTPR =
@@ -166,5 +167,45 @@ describe("buildDocx", () => {
 
   it("rechaza archivos que no son Word", async () => {
     await expect(loadTemplate(new Uint8Array([1, 2, 3]))).rejects.toThrow(/Word/);
+  });
+});
+
+describe("numeración del Word", () => {
+  const base =
+    '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440"/><w:pgNumType w:fmt="decimal" w:start="1"/><w:cols w:space="720"/></w:sectPr>';
+
+  it("la primera sección empieza en el número pedido, antes de <w:cols> como exige Word", () => {
+    const s = withPageNumbering(base, 37, true);
+    expect(s).toContain('<w:pgNumType w:fmt="decimal" w:start="37"/><w:cols');
+    expect(s.match(/pgNumType/g)).toHaveLength(1);
+  });
+
+  it("las demás secciones no reinician aunque la plantilla lo diga", () => {
+    const s = withPageNumbering(base, 37, false);
+    expect(s).toContain('<w:pgNumType w:fmt="decimal"/>');
+    expect(s).not.toContain("w:start");
+  });
+
+  it("sin número pedido, la primera queda como la plantilla", () => {
+    expect(withPageNumbering(base, null, true)).toBe(base);
+  });
+
+  it("si la plantilla no tiene pgNumType, lo agrega solo cuando hace falta", () => {
+    const plain = '<w:sectPr><w:pgSz w:w="1" w:h="2"/></w:sectPr>';
+    expect(withPageNumbering(plain, null, false)).toBe(plain);
+    expect(withPageNumbering(plain, 5, true)).toBe(
+      '<w:sectPr><w:pgSz w:w="1" w:h="2"/><w:pgNumType w:start="5"/></w:sectPr>',
+    );
+  });
+
+  it("en el documento solo la primera de varias secciones lleva el inicio", async () => {
+    const t = await loadTemplate(await template());
+    const pages = [img(false), img(true), img(false)];
+    const zip = await JSZip.loadAsync(
+      await buildDocx(pages, { maxHeightMm: 200, pageNumberStart: 37 }, t),
+    );
+    const doc = (await zip.file("word/document.xml")?.async("string")) ?? "";
+    expect(doc.match(/w:start="37"/g)).toHaveLength(1);
+    expect(doc.indexOf('w:start="37"')).toBeLessThan(doc.indexOf('w:orient="landscape"'));
   });
 });

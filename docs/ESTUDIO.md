@@ -118,4 +118,10 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
       exportar), miniaturas con filtros "Para revisar" (recorte que corta contenido, páginas en
       blanco, sin encabezado del programa) y "Horizontales", arrastrar el PDF, fuentes IBM Plex
       incluidas y logo nuevo (hoja con marcas de corte).
+- [x] **0.7:** correcciones del ingeniero tras usarla: los números se escriben a mano (antes cada
+      tecla se ajustaba al mínimo), resolución con 250 / 300 / 350 o la que se escriba, volver a
+      "Abrir PDF" sin perder el archivo, "Ajustar solo esta página" dentro de "Igual en todas", la
+      numeración del Word puede seguir la del informe, y una explicación clara del espacio
+      alrededor del contenido.
+- [ ] Actualización automática desde la app y PDF grandes (análisis en segundo plano, Cancelar).
 - [ ] Instalador de macOS (ver [MACOS.md](MACOS.md)).

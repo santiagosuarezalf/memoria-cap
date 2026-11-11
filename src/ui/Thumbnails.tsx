@@ -10,6 +10,8 @@ export interface Thumb {
   crop: Crop;
   reasons: ReviewReason[];
   landscape: boolean;
+  /** Tiene su propio recorte, distinto del general. */
+  own: boolean;
 }
 
 /** Columna de miniaturas con filtros: todas, para revisar y horizontales. */
@@ -91,7 +93,7 @@ export function Thumbnails({
                 type="button"
                 onClick={() => onPage(t.n)}
                 aria-current={selected ? "page" : undefined}
-                aria-label={`Página ${t.n}${t.reasons.length ? `: ${t.reasons.map((r) => REASON_LABELS[r]).join(", ")}` : ""}`}
+                aria-label={`Página ${t.n}${t.own ? ", con recorte propio" : ""}${t.reasons.length ? `: ${t.reasons.map((r) => REASON_LABELS[r]).join(", ")}` : ""}`}
                 title={t.reasons.map((r) => REASON_LABELS[r]).join(" · ") || undefined}
                 className="flex flex-col items-center gap-1.5"
               >
@@ -110,6 +112,11 @@ export function Thumbnails({
                       height: `${(t.crop.y1 - t.crop.y0) * 100}%`,
                     }}
                   />
+                  {t.own && (
+                    <span className="absolute -bottom-1.5 -left-1.5 rounded bg-brand px-1 text-[10px] font-semibold text-white">
+                      propio
+                    </span>
+                  )}
                   {warn && (
                     <span className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-accent text-xs font-bold text-white">
                       !

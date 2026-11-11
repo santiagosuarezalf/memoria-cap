@@ -17,6 +17,9 @@ export interface ReviewPanelProps {
   skipRepeated: boolean;
   onSkipRepeated: (v: boolean) => void;
   manual: boolean;
+  /** La página actual tiene su propio recorte (en modo "Igual en todas"). */
+  ownCrop: boolean;
+  onOwnCrop: (on: boolean) => void;
   onResetCrop: () => void;
   masks: Mask[];
   selectedMask: string | null;
@@ -94,14 +97,39 @@ export function ReviewPanel(p: ReviewPanelProps) {
               { value: "page", label: "Por página" },
             ]}
           />
-          <NumberField
-            label="Margen alrededor del contenido"
-            unit="mm"
-            value={p.paddingMm}
-            min={0}
-            max={30}
-            onChange={p.onPadding}
-          />
+          {p.mode === "all" && (
+            <div
+              className={`flex flex-col gap-2 rounded-lg border p-3 ${
+                p.ownCrop ? "border-brand bg-brand-soft" : "border-line"
+              }`}
+            >
+              <Check
+                checked={p.ownCrop}
+                onChange={p.onOwnCrop}
+                detail={
+                  p.ownCrop
+                    ? "Lo que mueva ahora solo cambia esta página. Las demás siguen con el recorte general."
+                    : "Para una hoja distinta, como una horizontal o una con un cuadro suelto, sin mover las demás."
+                }
+              >
+                Ajustar solo la página {p.page}
+              </Check>
+            </div>
+          )}
+          <div className="flex flex-col gap-1">
+            <NumberField
+              label="Espacio alrededor del contenido"
+              unit="mm"
+              value={p.paddingMm}
+              min={0}
+              max={30}
+              onChange={p.onPadding}
+            />
+            <span className="text-xs text-subtle">
+              La app busca hasta dónde llega lo impreso y deja este borde en blanco alrededor, para
+              que nada quede pegado al corte.
+            </span>
+          </div>
           <Check
             checked={p.skipRepeated}
             onChange={p.onSkipRepeated}

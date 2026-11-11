@@ -1,6 +1,7 @@
 // Piezas comunes de la interfaz, con la línea visual escogida (propuesta A).
 
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import { committedValue, formatValue, liveValue } from "./number";
 
 /** El logo: una hoja con las marcas de corte. */
 export function Logo({ size = 24 }: { size?: number }) {
@@ -147,21 +148,77 @@ export function NumberField({
     >
       {label}
       <span className="flex items-center gap-2">
-        <input
-          type="number"
-          className={`${compact ? "w-full" : "w-20"} h-9 rounded-md border border-line-strong bg-surface px-2.5 font-mono text-sm text-ink`}
-          value={Math.round(value * 10) / 10}
+        <NumberInput
+          className={`${compact ? "w-full" : "w-20"} h-9 rounded-md border border-line-strong bg-surface px-2.5 font-mono text-sm font-normal text-ink`}
+          value={value}
           min={min}
           max={max}
           step={step}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n)));
-          }}
+          onChange={onChange}
         />
         {unit && <span className="text-[13px] font-normal text-muted">{unit}</span>}
       </span>
     </label>
+  );
+}
+
+/**
+ * Campo numérico que deja escribir libremente: aplica el valor apenas es válido y, al salir del
+ * campo o con Enter, lo lleva al rango. Las flechas del teclado y del campo siguen funcionando.
+ */
+export function NumberInput({
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  className,
+  ...rest
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (n: number) => void;
+  className?: string;
+  "aria-label"?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? formatValue(value);
+  const commit = () => {
+    if (draft === null) return;
+    const n = committedValue(draft, min, max, value);
+    setDraft(null);
+    if (n !== value) onChange(n);
+  };
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode="decimal"
+      className={className}
+      value={shown}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const n = liveValue(e.target.value, min, max);
+        if (n !== null) onChange(n);
+      }}
+      onBlur={commit}
+      // Al entrar al campo se selecciona el número, para reemplazarlo escribiendo encima.
+      onFocus={(e) => e.target.select()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          commit();
+          (e.target as HTMLInputElement).select();
+        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const base = draft === null ? value : committedValue(draft, min, max, value);
+          const delta = (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1);
+          setDraft(null);
+          onChange(Math.min(max, Math.max(min, Math.round((base + delta) * 100) / 100)));
+        }
+      }}
+    />
   );
 }
 

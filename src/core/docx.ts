@@ -111,6 +111,8 @@ export interface DocxImage {
 export interface DocxOptions {
   /** Altura máxima de la imagen en una hoja vertical. */
   maxHeightMm: number;
+  /** Número de la primera hoja, para seguir la numeración del informe; null = como la plantilla. */
+  pageNumberStart?: number | null;
 }
 
 /** Escala para que la imagen quepa en la caja, agrandando o achicando y sin deformar. */
@@ -128,6 +130,43 @@ export function boxFor(setup: PageSetup, maxHeightMm: number, landscape: boolean
     w: setup.heightMm - setup.marginLeftMm - setup.marginRightMm,
     h: setup.widthMm - setup.marginTopMm - setup.marginBottomMm - reserve,
   };
+}
+
+/** Elementos que en un sectPr van después de <w:pgNumType> (Word exige ese orden). */
+const AFTER_PGNUMTYPE = [
+  "cols",
+  "formProt",
+  "vAlign",
+  "noEndnote",
+  "titlePg",
+  "textDirection",
+  "bidi",
+  "rtlGutter",
+  "docGrid",
+  "printerSettings",
+  "sectPrChange",
+];
+
+/**
+ * Ajusta la numeración de una sección. La primera puede empezar en un número dado (el anexo
+ * continúa la numeración del informe); las demás nunca reinician, aunque la plantilla lo diga, o
+ * cada cambio a horizontal volvería a empezar la cuenta.
+ */
+export function withPageNumbering(sectPr: string, startAt: number | null, first: boolean): string {
+  const existing = sectPr.match(/<w:pgNumType\b[^>]*\/>/)?.[0] ?? null;
+  const fmt = existing?.match(/\sw:fmt="[^"]*"/)?.[0] ?? "";
+  let el: string | null;
+  if (first && startAt !== null) el = `<w:pgNumType${fmt} w:start="${startAt}"/>`;
+  else if (first)
+    el = existing; // la primera sección queda como la plantilla
+  else el = fmt ? `<w:pgNumType${fmt}/>` : null;
+  const without = existing ? sectPr.replace(existing, "") : sectPr;
+  if (!el) return without;
+  for (const name of AFTER_PGNUMTYPE) {
+    const i = without.indexOf(`<w:${name}`);
+    if (i !== -1) return without.slice(0, i) + el + without.slice(i);
+  }
+  return without.replace("</w:sectPr>", `${el}</w:sectPr>`);
 }
 
 /** sectPr para una sección, girando la hoja si es horizontal. */
@@ -257,6 +296,9 @@ export async function buildDocx(
 
   // Cuerpo: una imagen por hoja. Cada cambio de orientación cierra una sección.
   let body = "";
+  let sectionsEmitted = 0;
+  const numbered = (sectPr: string) =>
+    withPageNumbering(sectPr, options.pageNumberStart ?? null, sectionsEmitted++ === 0);
   images.forEach((img, i) => {
     const box = boxFor(setup, options.maxHeightMm, img.landscape);
     const size = fitInBox(img.widthMm, img.heightMm, box.w, box.h);
@@ -265,11 +307,11 @@ export async function buildDocx(
     const startsSection = i === 0 || images[i - 1].landscape !== img.landscape;
     body += imageParagraph(relIds[i], i + 1, size.widthMm, size.heightMm, {
       pageBreakBefore: !startsSection,
-      sectPr: endsSection ? sectPrFor(baseSectPr, img.landscape, setup) : undefined,
+      sectPr: endsSection ? numbered(sectPrFor(baseSectPr, img.landscape, setup)) : undefined,
     });
   });
   const lastLandscape = images.at(-1)?.landscape ?? false;
-  const finalSectPr = sectPrFor(baseSectPr, lastLandscape, setup);
+  const finalSectPr = numbered(sectPrFor(baseSectPr, lastLandscape, setup));
 
   const docPath = "word/document.xml";
   const doc = (await zip.file(docPath)?.async("string")) ?? "";

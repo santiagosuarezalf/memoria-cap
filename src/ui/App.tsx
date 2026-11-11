@@ -33,7 +33,7 @@ import { buildVectorPdf, type MarginsMm, marginsFrom, type Numbering } from "../
 import { chooseFolder, saveFile } from "../platform/save";
 import { About } from "./About";
 import { CropEditor } from "./CropEditor";
-import { FileButton, Icon, Logo } from "./controls";
+import { FileButton, Icon, Logo, NumberInput } from "./controls";
 import { ExportPanel, type Target } from "./ExportPanel";
 import { MaskEditor } from "./MaskEditor";
 import { ProfileMenu } from "./ProfileMenu";
@@ -94,6 +94,8 @@ export function App() {
   const [masks, setMasks] = useState<Mask[]>(initial.masks);
   const [selectedMask, setSelectedMask] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("open");
+  /** Número de la primera hoja del Word para seguir la numeración del informe (null = plantilla). */
+  const [wordStartAt, setWordStartAt] = useState<number | null>(null);
   const [filter, setFilter] = useState<ThumbFilter>("all");
   const [target, setTarget] = useState<Target>("word");
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -177,24 +179,26 @@ export function App() {
     const info = pages[n - 1];
     if (!info) return FULL_PAGE;
     const pad = (c: Crop) => padMm(c, paddingMm, info.widthMm, info.heightMm);
+    // Una página con recorte propio manda, también en "Igual en todas".
+    if (pageCrops[n]) return pageCrops[n];
     if (mode === "all") {
       const key = keyOf(n);
       const auto = unionAuto[key];
       return globalCrops[key] ?? (auto ? pad(auto) : FULL_PAGE);
     }
     const auto = autos[n - 1]?.auto;
-    return pageCrops[n] ?? (auto ? pad(auto) : FULL_PAGE);
+    return auto ? pad(auto) : FULL_PAGE;
   }
 
   function setCrop(c: Crop) {
-    if (mode === "all") {
+    if (mode === "all" && !pageCrops[page]) {
       setGlobalCrops((prev) => ({ ...prev, [keyOf(page)]: c }));
       setCropsFromProfile(false);
     } else setPageCrops((prev) => ({ ...prev, [page]: c }));
   }
 
-  const manual =
-    mode === "all" ? globalCrops[keyOf(page)] !== undefined : pageCrops[page] !== undefined;
+  const ownCrop = pageCrops[page] !== undefined;
+  const manual = mode === "all" ? globalCrops[keyOf(page)] !== undefined : ownCrop;
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -234,12 +238,12 @@ export function App() {
   }
 
   // El lienzo de la vista previa aparece cuando termina el análisis: por eso depende de las páginas.
-  const analyzed = pages.length > 0;
+  const workspace = pages.length > 0 && step !== "open";
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!doc || !canvas || !analyzed) return;
+    if (!doc || !canvas || !workspace) return;
     renderPage(doc, page, PREVIEW_DPI, canvas).catch(() => {});
-  }, [doc, page, analyzed]);
+  }, [doc, page, workspace]);
 
   async function exportImages() {
     if (!doc || pages.length === 0) return;
@@ -311,7 +315,11 @@ export function App() {
         });
       }
       setProgress({ label: "Armando el Word", done: total, total });
-      const docx = await buildDocx(images, { maxHeightMm }, template?.t);
+      const docx = await buildDocx(
+        images,
+        { maxHeightMm, pageNumberStart: wordStartAt },
+        template?.t,
+      );
       const saved = await saveFile(`${baseName}.docx`, docx, {
         name: "Documento de Word",
         extensions: ["docx"],
@@ -377,6 +385,7 @@ export function App() {
       src: p.thumb,
       crop,
       landscape: p.widthMm > p.heightMm,
+      own: mode === "all" && pageCrops[i + 1] !== undefined,
       reasons: reviewReasons({
         widthMm: p.widthMm,
         heightMm: p.heightMm,
@@ -442,18 +451,16 @@ export function App() {
       <Stepper
         step={ready ? step : "open"}
         canReach={(s) => (s === "open" ? true : ready)}
-        onStep={(s) => {
-          if (s === "open") {
-            setDoc(null);
-            setPages([]);
-            setFileName("");
-          }
-          setStep(s);
-        }}
+        onStep={setStep}
       />
 
-      {!ready ? (
-        <StartScreen onFile={onFile} progress={progress} />
+      {!ready || step === "open" ? (
+        <StartScreen
+          onFile={onFile}
+          progress={progress}
+          current={ready ? { name: fileName, pages: pages.length } : null}
+          onContinue={() => setStep("review")}
+        />
       ) : (
         <div className="flex min-h-0 flex-1">
           <Thumbnails
@@ -512,16 +519,13 @@ export function App() {
               </button>
               <label className="flex items-center gap-1.5">
                 Página
-                <input
-                  type="number"
+                <NumberInput
+                  aria-label="Número de página"
                   className="h-9 w-16 rounded-md border border-line-strong bg-surface text-center font-mono text-sm text-ink"
                   min={1}
                   max={pages.length}
                   value={page}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    if (n >= 1 && n <= pages.length) setPage(n);
-                  }}
+                  onChange={(n) => setPage(Math.round(n))}
                 />
                 de {pages.length}
               </label>
@@ -563,6 +567,8 @@ export function App() {
                 }}
                 maxHeightMm={maxHeightMm}
                 onMaxHeight={setMaxHeightMm}
+                wordStartAt={wordStartAt}
+                onWordStartAt={setWordStartAt}
                 letterheadName={letterhead?.name ?? null}
                 onLetterhead={onLetterhead}
                 onClearLetterhead={() => setLetterhead(null)}
@@ -593,6 +599,12 @@ export function App() {
                 skipRepeated={skipRepeated}
                 onSkipRepeated={setSkipRepeated}
                 manual={manual}
+                ownCrop={ownCrop}
+                onOwnCrop={(on) =>
+                  on
+                    ? setPageCrops((prev) => ({ ...prev, [page]: cropFor(page) }))
+                    : setPageCrops(({ [page]: _, ...rest }) => rest)
+                }
                 onResetCrop={() =>
                   mode === "all"
                     ? setGlobalCrops(({ [keyOf(page)]: _, ...rest }) => rest)
