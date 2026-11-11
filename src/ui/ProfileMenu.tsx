@@ -53,23 +53,19 @@ export function ProfileMenu({
         type="button"
         disabled={disabled}
         aria-expanded={open}
-        className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-600"
+        className="h-9 rounded-md border border-line-strong bg-surface px-3 text-[13px] hover:bg-canvas disabled:opacity-50"
         onClick={() => setOpen((o) => !o)}
       >
         Perfil ▾
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 flex w-60 flex-col rounded border border-slate-300 bg-white py-1 text-sm shadow-lg dark:border-slate-600 dark:bg-slate-800">
-          <button
-            type="button"
-            className="px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
-            onClick={save}
-          >
+        <div className="absolute right-0 z-30 mt-1 flex w-64 flex-col rounded-lg border border-line bg-surface py-1 text-[13px] shadow-lg">
+          <button type="button" className="px-3 py-2 text-left hover:bg-canvas" onClick={save}>
             Guardar configuración…
           </button>
           <button
             type="button"
-            className="px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="px-3 py-2 text-left hover:bg-canvas"
             onClick={() => {
               setOpen(false);
               input.current?.click();

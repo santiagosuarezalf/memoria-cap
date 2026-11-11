@@ -114,4 +114,8 @@ porque es AGPL y obligaría a todo el proyecto a serlo.
 - [x] **0.5:** máscaras (se arrastran sobre la vista previa; todas las páginas o un rango; en el
       PDF vectorial tapan a la vista pero el texto de debajo sigue en el archivo, y la app lo avisa),
       perfiles .json, la última configuración se recuerda, e importación de los `.vic` de ImageCap.
+- [x] **0.6:** interfaz nueva, escogida entre tres propuestas: flujo en 3 pasos (abrir, revisar,
+      exportar), miniaturas con filtros "Para revisar" (recorte que corta contenido, páginas en
+      blanco, sin encabezado del programa) y "Horizontales", arrastrar el PDF, fuentes IBM Plex
+      incluidas y logo nuevo (hoja con marcas de corte).
 - [ ] Instalador de macOS (ver [MACOS.md](MACOS.md)).

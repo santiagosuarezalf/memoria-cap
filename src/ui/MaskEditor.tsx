@@ -68,9 +68,7 @@ export function MaskEditor({
             key={m.id}
             aria-label={`Máscara ${i + 1}`}
             className={`pointer-events-auto absolute cursor-move touch-none ${
-              isSel
-                ? "outline-none ring-2 ring-sky-500"
-                : "outline-1 outline-dashed outline-slate-500"
+              isSel ? "outline-none ring-2 ring-brand" : "outline-1 outline-dashed outline-subtle"
             }`}
             style={{
               left: pct(m.rect.x0),
@@ -94,7 +92,7 @@ export function MaskEditor({
               (["tl", "br"] as const).map((corner) => (
                 <span
                   key={corner}
-                  className={`absolute size-3 rounded-sm border border-white bg-sky-500 ${
+                  className={`absolute size-3 rounded-sm border border-white bg-brand ${
                     corner === "tl"
                       ? "-left-1.5 -top-1.5 cursor-nwse-resize"
                       : "-bottom-1.5 -right-1.5 cursor-nwse-resize"

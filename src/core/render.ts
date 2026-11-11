@@ -13,6 +13,8 @@ export interface PageInfo {
   heightMm: number;
   /** Bloques de contenido de arriba abajo; vacío si la página está en blanco. */
   bands: Band[];
+  /** Miniatura (JPEG en data URL) hecha con la misma imagen del análisis. */
+  thumb: string;
 }
 
 export async function analyzePages(
@@ -34,6 +36,7 @@ export async function analyzePages(
       widthMm: ((rotated ? hPt : wPt) / 72) * 25.4,
       heightMm: ((rotated ? wPt : hPt) / 72) * 25.4,
       bands: inkBands(data, canvas.width, canvas.height),
+      thumb: canvas.toDataURL("image/jpeg", 0.75),
     });
     onProgress(n, doc.numPages);
   }

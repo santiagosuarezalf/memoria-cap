@@ -9,7 +9,7 @@ export function About({ onClose }: { onClose: () => void }) {
       ref={ref}
       onClose={onClose}
       aria-label="Acerca de MemoriaCap"
-      className="m-auto max-w-md rounded-lg bg-white p-6 shadow-xl backdrop:bg-black/40 dark:bg-slate-800 dark:text-slate-100"
+      className="m-auto max-w-md rounded-xl bg-surface p-6 text-ink shadow-xl backdrop:bg-ink/40"
     >
       <h2 className="text-lg font-semibold">MemoriaCap</h2>
       <p className="mt-3 text-sm">
@@ -23,7 +23,7 @@ export function About({ onClose }: { onClose: () => void }) {
       <form method="dialog">
         <button
           type="submit"
-          className="mt-5 rounded bg-slate-800 px-4 py-2 text-sm text-white dark:bg-slate-200 dark:text-slate-900"
+          className="mt-5 h-10 rounded-md bg-brand px-4 text-sm font-medium text-white hover:bg-brand-hover"
         >
           Cerrar
         </button>

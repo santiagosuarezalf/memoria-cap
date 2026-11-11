@@ -28,19 +28,19 @@ import {
   renderCropped,
   rotateLeft,
 } from "../core/render";
-import {
-  buildVectorPdf,
-  DEFAULT_NUMBERING,
-  type MarginsMm,
-  marginsFrom,
-  type Numbering,
-} from "../core/vectorpdf";
+import { reviewReasons } from "../core/review";
+import { buildVectorPdf, type MarginsMm, marginsFrom, type Numbering } from "../core/vectorpdf";
 import { chooseFolder, saveFile } from "../platform/save";
 import { About } from "./About";
 import { CropEditor } from "./CropEditor";
+import { FileButton, Icon, Logo } from "./controls";
+import { ExportPanel, type Target } from "./ExportPanel";
 import { MaskEditor } from "./MaskEditor";
-import { MaskList } from "./MaskList";
 import { ProfileMenu } from "./ProfileMenu";
+import { ReviewPanel } from "./ReviewPanel";
+import { StartScreen } from "./StartScreen";
+import { type Step, Stepper } from "./Stepper";
+import { type Thumb, type ThumbFilter, Thumbnails } from "./Thumbnails";
 
 const PREVIEW_DPI = 110;
 
@@ -73,6 +73,9 @@ export function App() {
   // En modo "todas", el recorte manual se guarda por tamaño de hoja (vertical y horizontal aparte).
   const [globalCrops, setGlobalCrops] = useState<Record<string, Crop>>(initial.globalCrops);
   const [pageCrops, setPageCrops] = useState<Record<number, Crop>>({});
+  // Un recorte general que vino de un perfil o un .vic sirve para el próximo PDF; uno ajustado a
+  // mano era para este PDF y se descarta al abrir otro.
+  const [cropsFromProfile, setCropsFromProfile] = useState(false);
   const [dpi, setDpi] = useState(initial.dpi);
   const [format, setFormat] = useState<ImageFormat>(initial.format);
   const [baseName, setBaseName] = useState("anexo");
@@ -90,6 +93,9 @@ export function App() {
   const [numbering, setNumbering] = useState<Numbering | null>(initial.numbering);
   const [masks, setMasks] = useState<Mask[]>(initial.masks);
   const [selectedMask, setSelectedMask] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>("open");
+  const [filter, setFilter] = useState<ThumbFilter>("all");
+  const [target, setTarget] = useState<Target>("word");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const busy = progress !== null;
 
@@ -122,6 +128,7 @@ export function App() {
     setNumbering(s.numbering);
     setMasks(s.masks);
     setSelectedMask(null);
+    setCropsFromProfile(Object.keys(s.globalCrops).length > 0);
   }
   // Se recuerda en este equipo cada vez que cambia algo.
   const serialized = serializeProfile(settings);
@@ -142,6 +149,7 @@ export function App() {
     }
     setMode("all");
     setGlobalCrops(crops);
+    setCropsFromProfile(true);
     setDpi(v.dpi);
     setFormat(v.format);
     if (v.maxHeightMm) setMaxHeightMm(v.maxHeightMm);
@@ -179,8 +187,10 @@ export function App() {
   }
 
   function setCrop(c: Crop) {
-    if (mode === "all") setGlobalCrops((prev) => ({ ...prev, [keyOf(page)]: c }));
-    else setPageCrops((prev) => ({ ...prev, [page]: c }));
+    if (mode === "all") {
+      setGlobalCrops((prev) => ({ ...prev, [keyOf(page)]: c }));
+      setCropsFromProfile(false);
+    } else setPageCrops((prev) => ({ ...prev, [page]: c }));
   }
 
   const manual =
@@ -199,19 +209,23 @@ export function App() {
       return;
     }
     await doc?.loadingTask.destroy(); // libera el PDF anterior
+    setStep("open");
     setDoc(pdf);
     setSourceBytes(new Uint8Array(bytes)); // para copiar las páginas en vectorial
     setFileName(file.name);
     setBaseName(file.name.replace(/\.pdf$/i, ""));
     setPage(1);
     setPages([]);
-    setPageCrops({}); // los recortes por página son de este PDF; los generales siguen (perfil)
+    setPageCrops({}); // los recortes por página eran del PDF anterior
+    if (!cropsFromProfile) setGlobalCrops({});
     try {
       setProgress({ label: "Analizando páginas", done: 0, total: pdf.numPages });
       const info = await analyzePages(pdf, (done, total) =>
         setProgress({ label: "Analizando páginas", done, total }),
       );
       setPages(info);
+      setFilter("all");
+      setStep("review");
     } catch {
       setMessage({ kind: "error", text: "No se pudieron analizar las páginas del PDF." });
     } finally {
@@ -219,11 +233,13 @@ export function App() {
     }
   }
 
+  // El lienzo de la vista previa aparece cuando termina el análisis: por eso depende de las páginas.
+  const analyzed = pages.length > 0;
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!doc || !canvas) return;
+    if (!doc || !canvas || !analyzed) return;
     renderPage(doc, page, PREVIEW_DPI, canvas).catch(() => {});
-  }, [doc, page]);
+  }, [doc, page, analyzed]);
 
   async function exportImages() {
     if (!doc || pages.length === 0) return;
@@ -352,33 +368,57 @@ export function App() {
     setLetterhead({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
   }
 
+  // ---- Qué páginas merecen una mirada ----
+  const documentHasRepeated = skipRepeated && running.pagesWithHeader + running.pagesWithFooter > 0;
+  const thumbs: Thumb[] = pages.map((p, i) => {
+    const crop = cropFor(i + 1);
+    return {
+      n: i + 1,
+      src: p.thumb,
+      crop,
+      landscape: p.widthMm > p.heightMm,
+      reasons: reviewReasons({
+        widthMm: p.widthMm,
+        heightMm: p.heightMm,
+        bandCount: p.bands.length,
+        content: autos[i]?.auto ?? null,
+        crop,
+        hadRepeated: (running.repeated[i]?.size ?? 0) > 0,
+        documentHasRepeated,
+      }),
+    };
+  });
+  const reviewCount = thumbs.filter((t) => t.reasons.some((r) => r !== "landscape")).length;
+  const cutCount = thumbs.filter((t) => t.reasons.includes("cut")).length;
+
+  function exportNow() {
+    if (target === "word") return exportWord();
+    if (target === "pdf") return exportPdf();
+    return exportImages();
+  }
+
   const info = pages[page - 1];
   const crop = cropFor(page);
   const setup = template?.t.setup ?? DEFAULT_SETUP;
+  const ready = doc !== null && pages.length > 0;
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-3 border-b border-slate-200 px-4 py-2 dark:border-slate-700">
-        <h1 className="font-semibold">MemoriaCap</h1>
-        <label
-          className={`rounded bg-slate-800 px-3 py-1.5 text-sm text-white dark:bg-slate-200 dark:text-slate-900 ${
-            busy ? "pointer-events-none opacity-50" : "cursor-pointer"
-          }`}
-        >
-          Abrir PDF…
-          <input
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            disabled={busy}
-            onChange={(e) => {
-              onFile(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        {fileName && <span className="truncate text-sm text-slate-500">{fileName}</span>}
-        <span className="ml-auto" />
+    <div className="flex h-screen flex-col bg-canvas text-ink">
+      {/* Barra superior */}
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
+        <Logo size={24} />
+        <span className="text-[15px] font-semibold">MemoriaCap</span>
+        {ready && (
+          <span className="min-w-0 truncate text-[13px] text-subtle" title={fileName}>
+            {fileName} · {pages.length} páginas
+          </span>
+        )}
+        <span className="flex-1" />
+        {ready && (
+          <FileButton accept="application/pdf" onFile={onFile} disabled={busy}>
+            Abrir otro PDF
+          </FileButton>
+        )}
         <ProfileMenu
           settings={settings}
           disabled={busy}
@@ -390,493 +430,214 @@ export function App() {
           onError={(text) => setMessage({ kind: "error", text })}
           onSaved={() => setMessage({ kind: "ok", text: "Perfil guardado." })}
         />
-        <button type="button" className="text-sm underline" onClick={() => setAbout(true)}>
+        <button
+          type="button"
+          className="h-9 rounded-md px-2 text-[13px] text-muted hover:text-ink"
+          onClick={() => setAbout(true)}
+        >
           Acerca de
         </button>
       </header>
 
-      {message && (
-        <p
-          role="status"
-          className={`px-4 py-2 text-sm ${
-            message.kind === "ok" ? "bg-emerald-100 text-emerald-900" : "bg-red-100 text-red-800"
-          }`}
-        >
-          {message.text}
-        </p>
-      )}
+      <Stepper
+        step={ready ? step : "open"}
+        canReach={(s) => (s === "open" ? true : ready)}
+        onStep={(s) => {
+          if (s === "open") {
+            setDoc(null);
+            setPages([]);
+            setFileName("");
+          }
+          setStep(s);
+        }}
+      />
 
-      <div className="flex min-h-0 flex-1">
-        {doc && (
-          <aside className="flex w-72 shrink-0 flex-col gap-5 overflow-y-auto border-r border-slate-200 p-4 text-sm dark:border-slate-700">
-            <Section title="Recorte">
-              <fieldset className="flex flex-col gap-1">
-                <Radio
-                  name="mode"
-                  checked={mode === "all"}
-                  onChange={() => setMode("all")}
-                  label="Mismo recorte para todas"
-                />
-                <Radio
-                  name="mode"
-                  checked={mode === "page"}
-                  onChange={() => setMode("page")}
-                  label="Un recorte por página"
-                />
-              </fieldset>
-              <NumberField
-                label="Margen alrededor del contenido"
-                unit="mm"
-                value={paddingMm}
-                min={0}
-                max={30}
-                onChange={setPaddingMm}
+      {!ready ? (
+        <StartScreen onFile={onFile} progress={progress} />
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <Thumbnails
+            thumbs={thumbs}
+            page={page}
+            filter={filter}
+            onFilter={setFilter}
+            onPage={setPage}
+          />
+
+          {/* Vista previa */}
+          <main className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 overflow-auto p-5">
+            <div className="relative shadow-[0_1px_3px_rgba(20,32,46,0.12),0_8px_24px_rgba(20,32,46,0.08)]">
+              <canvas
+                ref={canvasRef}
+                className="block h-auto max-h-[calc(100vh-15rem)] w-auto bg-surface"
               />
-              <label className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={skipRepeated}
-                  onChange={(e) => setSkipRepeated(e.target.checked)}
-                />
-                <span>
-                  Quitar encabezado y pie del programa
-                  <span className="block text-xs text-slate-500">
-                    {running.pagesWithHeader + running.pagesWithFooter === 0
-                      ? "No se encontraron repetidos"
-                      : `Encabezado en ${running.pagesWithHeader} y pie en ${running.pagesWithFooter} de ${pages.length} páginas`}
-                  </span>
-                </span>
-              </label>
-              <p className="text-xs text-slate-500">
-                Arrastre los bordes naranjas o selecciónelos y use las flechas (Shift para mover
-                más).
-              </p>
-              {manual && (
-                <button
-                  type="button"
-                  className="self-start underline"
-                  onClick={() =>
-                    mode === "all"
-                      ? setGlobalCrops(({ [keyOf(page)]: _, ...rest }) => rest)
-                      : setPageCrops(({ [page]: _, ...rest }) => rest)
-                  }
+              {info && step === "review" && <CropEditor crop={crop} onChange={setCrop} />}
+              {info && step === "export" && (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 overflow-hidden"
                 >
-                  Volver al recorte automático
-                </button>
+                  <span
+                    className="absolute border-2 border-accent shadow-[0_0_0_9999px_rgba(20,32,46,0.38)]"
+                    style={{
+                      left: `${crop.x0 * 100}%`,
+                      top: `${crop.y0 * 100}%`,
+                      width: `${(crop.x1 - crop.x0) * 100}%`,
+                      height: `${(crop.y1 - crop.y0) * 100}%`,
+                    }}
+                  />
+                </span>
               )}
-            </Section>
-
-            <Section title="Máscaras">
-              <MaskList
-                masks={masks}
-                page={page}
-                totalPages={doc.numPages}
-                selected={selectedMask}
-                onSelect={setSelectedMask}
-                onChange={setMasks}
-              />
-            </Section>
-
-            <Section title="Salida">
-              <NumberField
-                label="Resolución"
-                unit="dpi"
-                value={dpi}
-                min={72}
-                max={600}
-                step={10}
-                onChange={setDpi}
-              />
-              <fieldset className="flex gap-4">
-                <Radio
-                  name="fmt"
-                  checked={format === "png"}
-                  onChange={() => setFormat("png")}
-                  label="PNG (nítido)"
+              {info && (
+                <MaskEditor
+                  masks={masks}
+                  page={page}
+                  selected={step === "review" ? selectedMask : null}
+                  onSelect={setSelectedMask}
+                  onChange={(id, rect) =>
+                    setMasks((all) => all.map((m) => (m.id === id ? { ...m, rect } : m)))
+                  }
                 />
-                <Radio
-                  name="fmt"
-                  checked={format === "jpg"}
-                  onChange={() => setFormat("jpg")}
-                  label="JPG (liviano)"
-                />
-              </fieldset>
-              <label className="flex flex-col gap-1">
-                Nombre de salida
-                <input
-                  className="rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-600"
-                  value={baseName}
-                  onChange={(e) => setBaseName(e.target.value)}
-                />
-              </label>
-              <fieldset className="flex flex-col gap-1">
-                <legend className="mb-1">Páginas horizontales</legend>
-                <Radio
-                  name="land"
-                  checked={landscapeMode === "rotate"}
-                  onChange={() => setLandscapeMode("rotate")}
-                  label="Girarlas para que queden de pie"
-                />
-                <Radio
-                  name="land"
-                  checked={landscapeMode === "section"}
-                  onChange={() => setLandscapeMode("section")}
-                  label="Ponerlas en hoja horizontal"
-                />
-              </fieldset>
-            </Section>
-
-            <Section title="Word">
-              <div className="flex flex-col gap-1">
-                <span>Plantilla con encabezado</span>
-                <span className="flex items-center gap-2">
-                  <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 dark:border-slate-600">
-                    Elegir…
-                    <input
-                      type="file"
-                      accept=".docx,.dotx"
-                      className="hidden"
-                      onChange={(e) => {
-                        onTemplate(e.target.files?.[0]);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <span className="min-w-0 truncate text-xs" title={template?.name}>
-                    {template ? template.name : "Ninguna: hoja carta en blanco"}
-                  </span>
-                  {template && (
-                    <button
-                      type="button"
-                      className="text-xs underline"
-                      onClick={() => {
-                        setTemplate(null);
-                        setMaxHeightMm(suggestedMaxHeightMm(DEFAULT_SETUP));
-                      }}
-                    >
-                      Quitar
-                    </button>
-                  )}
-                </span>
-                <span className="text-xs text-slate-500">
-                  Hoja de {Math.round(setup.widthMm)} × {Math.round(setup.heightMm)} mm; ancho útil{" "}
-                  {Math.round(setup.widthMm - setup.marginLeftMm - setup.marginRightMm)} mm.
-                </span>
-              </div>
-              <NumberField
-                label="Altura máxima de cada imagen"
-                unit="mm"
-                value={maxHeightMm}
-                min={50}
-                max={Math.round(setup.heightMm)}
-                onChange={setMaxHeightMm}
-              />
-              <p className="-mt-2 text-xs text-slate-500">
-                Si alguna imagen pasa a la hoja siguiente, bájela unos milímetros.
-              </p>
-              <button
-                type="button"
-                disabled={busy || pages.length === 0}
-                onClick={exportWord}
-                className="rounded bg-orange-600 px-3 py-2 font-medium text-white disabled:opacity-50"
-              >
-                Exportar a Word…
-              </button>
-            </Section>
-
-            <Section title="PDF vectorial">
-              <p className="-mt-1 text-xs text-slate-500">
-                Las páginas se copian sin pasar a imagen: nítidas a cualquier zoom y livianas.
-              </p>
-              <div className="flex flex-col gap-1">
-                <span>Hoja membretada (PDF)</span>
-                <span className="flex items-center gap-2">
-                  <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 dark:border-slate-600">
-                    Elegir…
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      className="hidden"
-                      onChange={(e) => {
-                        onLetterhead(e.target.files?.[0]);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <span className="min-w-0 truncate text-xs" title={letterhead?.name}>
-                    {letterhead ? letterhead.name : "Ninguna: hoja carta en blanco"}
-                  </span>
-                  {letterhead && (
-                    <button
-                      type="button"
-                      className="text-xs underline"
-                      onClick={() => setLetterhead(null)}
-                    >
-                      Quitar
-                    </button>
-                  )}
-                </span>
-                <span className="text-xs text-slate-500">
-                  Guarde la plantilla de Word como PDF (Archivo → Guardar como → PDF), sin el número
-                  de página: si lo trae, saldrá el mismo en todas. La numeración la pone la app
-                  (abajo).
-                </span>
-              </div>
-              <fieldset className="grid grid-cols-2 gap-x-3 gap-y-2">
-                <legend className="mb-1">Márgenes (mm)</legend>
-                {(
-                  [
-                    ["top", "Arriba"],
-                    ["bottom", "Abajo"],
-                    ["left", "Izquierda"],
-                    ["right", "Derecha"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label key={key} className="flex flex-col text-xs">
-                    {label}
-                    <input
-                      type="number"
-                      className="w-full rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
-                      min={0}
-                      max={150}
-                      value={Math.round(pdfMargins[key])}
-                      onChange={(e) => {
-                        const n = Number(e.target.value);
-                        if (Number.isFinite(n) && n >= 0)
-                          setPdfMargins((m) => ({ ...m, [key]: Math.min(150, n) }));
-                      }}
-                    />
-                  </label>
-                ))}
-              </fieldset>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={numbering !== null}
-                  onChange={(e) => setNumbering(e.target.checked ? DEFAULT_NUMBERING : null)}
-                />
-                Numerar las hojas
-              </label>
-              {numbering && (
-                <div className="-mt-1 flex flex-col gap-2 border-l-2 border-slate-300 pl-3 dark:border-slate-600">
-                  <label className="flex flex-col gap-1 text-xs">
-                    Texto ({"{n}"} = número, {"{total}"} = último)
-                    <input
-                      className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
-                      value={numbering.format}
-                      onChange={(e) => setNumbering({ ...numbering, format: e.target.value })}
-                    />
-                  </label>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-                    <label className="flex flex-col text-xs">
-                      Empieza en
-                      <input
-                        type="number"
-                        min={1}
-                        className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
-                        value={numbering.startAt}
-                        onChange={(e) => {
-                          const n = Math.round(Number(e.target.value));
-                          if (n >= 1) setNumbering({ ...numbering, startAt: n });
-                        }}
-                      />
-                    </label>
-                    <label className="flex flex-col text-xs">
-                      Posición
-                      <select
-                        className="rounded border border-slate-300 bg-transparent px-1 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-                        value={numbering.position}
-                        onChange={(e) =>
-                          setNumbering({
-                            ...numbering,
-                            position: e.target.value as Numbering["position"],
-                          })
-                        }
-                      >
-                        <option value="left">Izquierda</option>
-                        <option value="center">Centro</option>
-                        <option value="right">Derecha</option>
-                      </select>
-                    </label>
-                    <label className="flex flex-col text-xs">
-                      Desde abajo (mm)
-                      <input
-                        type="number"
-                        min={3}
-                        max={60}
-                        className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
-                        value={numbering.bottomMm}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (n >= 3 && n <= 60) setNumbering({ ...numbering, bottomMm: n });
-                        }}
-                      />
-                    </label>
-                    <label className="flex flex-col text-xs">
-                      Tamaño (pt)
-                      <input
-                        type="number"
-                        min={6}
-                        max={24}
-                        className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-600"
-                        value={numbering.sizePt}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          if (n >= 6 && n <= 24) setNumbering({ ...numbering, sizePt: n });
-                        }}
-                      />
-                    </label>
-                  </div>
-                </div>
               )}
-              <button
-                type="button"
-                disabled={busy || pages.length === 0}
-                onClick={exportPdf}
-                className="rounded bg-orange-600 px-3 py-2 font-medium text-white disabled:opacity-50"
-              >
-                Exportar a PDF…
-              </button>
-            </Section>
-
-            <Section title="Imágenes sueltas">
-              <span className="text-xs text-slate-500">
-                {pageFileName(baseName, 1, doc.numPages, format)}, …
-              </span>
-              <button
-                type="button"
-                disabled={busy || pages.length === 0}
-                onClick={exportImages}
-                className="rounded border border-orange-600 px-3 py-2 font-medium text-orange-600 disabled:opacity-50"
-              >
-                Exportar {doc.numPages} imágenes…
-              </button>
-            </Section>
-          </aside>
-        )}
-
-        <main className="flex min-w-0 flex-1 flex-col items-center gap-3 overflow-auto p-4">
-          {!doc && (
-            <p className="mt-20 max-w-md text-center text-slate-500">
-              Abra el PDF de la memoria de cálculo. La app detecta sola el área con contenido de
-              cada página.
-            </p>
-          )}
-          {progress && (
-            <div className="w-full max-w-md">
-              <p className="mb-1 text-sm">
-                {progress.label}: {progress.done} de {progress.total}
-              </p>
-              <progress className="w-full" value={progress.done} max={progress.total} />
             </div>
-          )}
-          {doc && (
-            <nav className="flex items-center gap-3 text-sm">
+            <nav aria-label="Páginas" className="flex items-center gap-2.5 text-[13px] text-muted">
               <button
                 type="button"
                 aria-label="Página anterior"
                 disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
+                onClick={() => setPage((n) => n - 1)}
+                className="flex size-9 items-center justify-center rounded-md border border-line-strong bg-surface text-ink disabled:opacity-40"
               >
-                ◀
+                <Icon name="left" />
               </button>
-              <label className="flex items-center gap-1">
+              <label className="flex items-center gap-1.5">
                 Página
                 <input
                   type="number"
-                  className="w-16 rounded border border-slate-300 bg-transparent px-1 text-center dark:border-slate-600"
+                  className="h-9 w-16 rounded-md border border-line-strong bg-surface text-center font-mono text-sm text-ink"
                   min={1}
-                  max={doc.numPages}
+                  max={pages.length}
                   value={page}
                   onChange={(e) => {
                     const n = Number(e.target.value);
-                    if (n >= 1 && n <= doc.numPages) setPage(n);
+                    if (n >= 1 && n <= pages.length) setPage(n);
                   }}
                 />
-                de {doc.numPages}
+                de {pages.length}
               </label>
               <button
                 type="button"
                 aria-label="Página siguiente"
-                disabled={page >= doc.numPages}
-                onClick={() => setPage((p) => p + 1)}
+                disabled={page >= pages.length}
+                onClick={() => setPage((n) => n + 1)}
+                className="flex size-9 items-center justify-center rounded-md border border-line-strong bg-surface text-ink disabled:opacity-40"
               >
-                ▶
+                <Icon name="right" />
               </button>
-              {info && info.bands.length === 0 && (
-                <span className="text-slate-500">(página en blanco)</span>
-              )}
             </nav>
-          )}
-          <div className="relative shadow-lg" hidden={!doc}>
-            <canvas ref={canvasRef} className="block h-auto max-h-[calc(100vh-9rem)] w-auto" />
-            {info && <CropEditor crop={crop} onChange={setCrop} />}
-            {info && (
-              <MaskEditor
-                masks={masks}
+          </main>
+
+          {/* Panel del paso */}
+          <aside className="w-[22rem] shrink-0 border-l border-line bg-surface">
+            {step === "export" ? (
+              <ExportPanel
+                totalPages={pages.length}
+                target={target}
+                onTarget={setTarget}
+                baseName={baseName}
+                onBaseName={setBaseName}
+                dpi={dpi}
+                onDpi={setDpi}
+                format={format}
+                onFormat={setFormat}
+                landscapeMode={landscapeMode}
+                onLandscapeMode={setLandscapeMode}
+                hasLandscape={thumbs.some((t) => t.landscape)}
+                hasMasks={masks.length > 0}
+                templateName={template?.name ?? null}
+                setup={setup}
+                onTemplate={onTemplate}
+                onClearTemplate={() => {
+                  setTemplate(null);
+                  setMaxHeightMm(suggestedMaxHeightMm(DEFAULT_SETUP));
+                }}
+                maxHeightMm={maxHeightMm}
+                onMaxHeight={setMaxHeightMm}
+                letterheadName={letterhead?.name ?? null}
+                onLetterhead={onLetterhead}
+                onClearLetterhead={() => setLetterhead(null)}
+                pdfMargins={pdfMargins}
+                onPdfMargins={setPdfMargins}
+                numbering={numbering}
+                onNumbering={setNumbering}
+                progress={progress}
+                cutCount={cutCount}
+                onReview={() => {
+                  setStep("review");
+                  setFilter("review");
+                }}
+                onExport={exportNow}
+              />
+            ) : (
+              <ReviewPanel
+                totalPages={pages.length}
                 page={page}
-                selected={selectedMask}
-                onSelect={setSelectedMask}
-                onChange={(id, rect) =>
-                  setMasks((all) => all.map((m) => (m.id === id ? { ...m, rect } : m)))
+                pageReasons={thumbs[page - 1]?.reasons ?? []}
+                pagesWithHeader={running.pagesWithHeader}
+                pagesWithFooter={running.pagesWithFooter}
+                reviewCount={reviewCount}
+                mode={mode}
+                onMode={setMode}
+                paddingMm={paddingMm}
+                onPadding={setPaddingMm}
+                skipRepeated={skipRepeated}
+                onSkipRepeated={setSkipRepeated}
+                manual={manual}
+                onResetCrop={() =>
+                  mode === "all"
+                    ? setGlobalCrops(({ [keyOf(page)]: _, ...rest }) => rest)
+                    : setPageCrops(({ [page]: _, ...rest }) => rest)
                 }
+                masks={masks}
+                selectedMask={selectedMask}
+                onSelectMask={setSelectedMask}
+                onMasks={setMasks}
+                onShowReview={() => {
+                  setFilter("review");
+                  const first = thumbs.find((t) => t.reasons.some((r) => r !== "landscape"));
+                  if (first) setPage(first.n);
+                }}
+                onNext={() => setStep("export")}
               />
             )}
-          </div>
-        </main>
-      </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Mensajes */}
+      {message && (
+        <div
+          role="status"
+          className={`fixed right-5 bottom-5 z-40 flex max-w-md items-start gap-3 rounded-lg p-4 text-[13px] shadow-lg ${
+            message.kind === "ok" ? "bg-ok-soft text-ok-ink" : "bg-bad-soft text-bad-ink"
+          }`}
+        >
+          <span className="mt-px shrink-0">
+            <Icon name={message.kind === "ok" ? "check" : "alert"} size={17} />
+          </span>
+          <span className="flex-1">{message.text}</span>
+          <button
+            type="button"
+            aria-label="Cerrar mensaje"
+            onClick={() => setMessage(null)}
+            className="shrink-0 opacity-70 hover:opacity-100"
+          >
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+      )}
 
       {about && <About onClose={() => setAbout(false)} />}
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Radio(props: { name: string; checked: boolean; onChange: () => void; label: string }) {
-  return (
-    <label className="flex items-center gap-2">
-      <input type="radio" name={props.name} checked={props.checked} onChange={props.onChange} />
-      {props.label}
-    </label>
-  );
-}
-
-function NumberField(props: {
-  label: string;
-  unit: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (n: number) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      {props.label}
-      <span className="flex items-center gap-2">
-        <input
-          type="number"
-          className="w-24 rounded border border-slate-300 bg-transparent px-2 py-1 dark:border-slate-600"
-          value={props.value}
-          min={props.min}
-          max={props.max}
-          step={props.step ?? 1}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (Number.isFinite(n)) props.onChange(Math.min(props.max, Math.max(props.min, n)));
-          }}
-        />
-        {props.unit}
-      </span>
-    </label>
   );
 }

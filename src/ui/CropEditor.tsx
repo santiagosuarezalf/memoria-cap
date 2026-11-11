@@ -29,7 +29,7 @@ export function CropEditor({ crop, onChange }: { crop: Crop; onChange: (c: Crop)
   }
 
   const pct = (n: number) => `${n * 100}%`;
-  const shade = "absolute bg-slate-900/45";
+  const shade = "absolute bg-ink/40";
 
   return (
     <div

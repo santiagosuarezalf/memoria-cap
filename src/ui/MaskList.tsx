@@ -1,7 +1,6 @@
 import { MASK_COLORS, type Mask, type MaskColor, newMask } from "../core/mask";
 
-const field =
-  "rounded border border-slate-300 bg-transparent px-1 py-0.5 text-sm dark:border-slate-600 dark:bg-slate-900";
+const field = "h-8 rounded-md border border-line-strong bg-surface px-1.5 text-[13px] text-ink";
 
 /** Lista de máscaras: color, a qué páginas aplica y borrar. */
 export function MaskList({
@@ -25,7 +24,7 @@ export function MaskList({
   return (
     <div className="flex flex-col gap-2">
       {masks.length === 0 && (
-        <p className="text-xs text-slate-500">
+        <p className="m-0 text-xs text-subtle">
           Tape zonas de la página, como el logo o la marca de agua del programa.
         </p>
       )}
@@ -38,7 +37,7 @@ export function MaskList({
             key={m.id}
             onClick={() => onSelect(m.id)}
             className={`flex flex-col gap-1.5 rounded border p-2 ${
-              m.id === selected ? "border-sky-500" : "border-slate-300 dark:border-slate-600"
+              m.id === selected ? "border-brand bg-brand-soft/40" : "border-line"
             }`}
           >
             <div className="flex items-center gap-2">
@@ -123,7 +122,7 @@ export function MaskList({
       })}
       <button
         type="button"
-        className="self-start rounded border border-slate-300 px-2 py-1 dark:border-slate-600"
+        className="h-9 self-start rounded-md border border-line-strong bg-surface px-3 text-[13px] hover:bg-canvas"
         onClick={() => {
           const m = newMask(page);
           onChange([...masks, m]);
@@ -133,7 +132,7 @@ export function MaskList({
         + Agregar máscara en esta página
       </button>
       {masks.length > 0 && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">
+        <p className="m-0 text-xs text-accent-ink">
           En Word e imágenes lo tapado desaparece. En el PDF vectorial la máscara tapa a la vista,
           pero el texto de debajo sigue en el archivo y se puede copiar.
         </p>

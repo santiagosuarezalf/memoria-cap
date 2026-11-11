@@ -1,6 +1,6 @@
 [package]
 name = "memoria-cap"
-version = "0.5.0"
+version = "0.6.0"
 description = "MemoriaCap: anexos de memorias de cálculo listos para radicar"
 license = "MIT"
 edition = "2021"

@@ -1,9 +1,45 @@
 @import "tailwindcss";
 
-:root {
-  color-scheme: light dark;
+/* Línea visual: tinta azul oscuro, azul para acciones y naranja solo para el recorte. */
+@theme {
+  --font-sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-ink: #14202e;
+  --color-navy: #14304f;
+  --color-brand: #1d4f91;
+  --color-brand-hover: #163d70;
+  --color-brand-soft: #e3ecf7;
+  --color-accent: #f26b1d;
+  --color-accent-soft: #fdf0e6;
+  --color-accent-ink: #8a3a0a;
+  --color-canvas: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-well: #eaeef2;
+  --color-line: #dde3ea;
+  --color-line-strong: #c9d2dc;
+  --color-muted: #3d4b5c;
+  --color-subtle: #5a6878;
+  --color-ok: #2e7d32;
+  --color-ok-soft: #eef5ec;
+  --color-ok-ink: #1f4d1a;
+  --color-bad-soft: #fdecec;
+  --color-bad-ink: #8a1c1c;
 }
+
+:root {
+  color-scheme: light;
+}
+
 body {
-  @apply bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* El foco del teclado siempre se ve. */
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
 }
